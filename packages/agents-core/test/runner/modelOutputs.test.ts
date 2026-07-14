@@ -1951,6 +1951,7 @@ describe('processModelResponse', () => {
           server_label: 'shopify',
           server_url: 'https://mcp.example.com/shopify',
           require_approval: 'always',
+          allowed_callers: ['programmatic'],
         },
       ],
     } as any;
@@ -1980,6 +1981,7 @@ describe('processModelResponse', () => {
       server_label: 'shopify',
       server_url: 'https://mcp.example.com/shopify',
       require_approval: 'always',
+      allowed_callers: ['programmatic'],
     });
   });
 

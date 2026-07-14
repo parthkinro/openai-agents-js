@@ -1148,29 +1148,100 @@ function assertSchemaVersionSupportsProgrammaticToolCalling(
   );
 }
 
-function containsProgrammaticToolCallingState(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some(containsProgrammaticToolCallingState);
+function containsProgrammaticToolCallingState(
+  stateJson: z.infer<typeof SerializedRunState>,
+): boolean {
+  return (
+    containsProgrammaticToolCallingProtocolItems(stateJson.originalInput) ||
+    stateJson.modelResponses.some(
+      containsProgrammaticToolCallingInModelResponse,
+    ) ||
+    containsProgrammaticToolCallingInModelResponse(
+      stateJson.lastModelResponse,
+    ) ||
+    containsProgrammaticToolCallingRunItems(stateJson.generatedItems) ||
+    containsProgrammaticToolCallingInProcessedResponse(
+      stateJson.lastProcessedResponse,
+    )
+  );
+}
+
+function containsProgrammaticToolCallingInModelResponse(
+  modelResponse: z.infer<typeof modelResponseSchema> | undefined,
+): boolean {
+  return Boolean(
+    modelResponse?.output.some(isProgrammaticToolCallingProtocolItem),
+  );
+}
+
+function containsProgrammaticToolCallingRunItems(
+  items: z.infer<typeof itemSchema>[] | undefined,
+): boolean {
+  return Boolean(
+    items?.some((item) => isProgrammaticToolCallingProtocolItem(item.rawItem)),
+  );
+}
+
+function containsProgrammaticToolCallingProtocolItems(
+  items: string | protocol.ModelItem[],
+): boolean {
+  return Array.isArray(items)
+    ? items.some(isProgrammaticToolCallingProtocolItem)
+    : false;
+}
+
+function containsProgrammaticToolCallingInProcessedResponse(
+  processedResponse:
+    z.infer<typeof serializedProcessedResponseSchema> | undefined,
+): boolean {
+  if (!processedResponse) {
+    return false;
   }
+
+  return (
+    containsProgrammaticToolCallingRunItems(processedResponse.newItems) ||
+    processedResponse.functions.some(({ toolCall }) =>
+      isProgrammaticToolCallingProtocolItem(toolCall),
+    ) ||
+    (processedResponse.functionToolsNotFound ?? []).some(({ toolCall }) =>
+      isProgrammaticToolCallingProtocolItem(toolCall),
+    ) ||
+    (processedResponse.shellActions ?? []).some(({ toolCall }) =>
+      isProgrammaticToolCallingProtocolItem(toolCall),
+    ) ||
+    (processedResponse.applyPatchActions ?? []).some(({ toolCall }) =>
+      isProgrammaticToolCallingProtocolItem(toolCall),
+    )
+  );
+}
+
+function isProgrammaticToolCallingProtocolItem(value: unknown): boolean {
   if (!value || typeof value !== 'object') {
     return false;
   }
 
-  const record = value as Record<string, unknown>;
-  if (record.type === 'program_output') {
-    return true;
-  }
-  if (
-    record.type === 'program' &&
-    (typeof record.callId === 'string' ||
-      typeof record.call_id === 'string' ||
-      typeof record.callerId === 'string' ||
-      typeof record.caller_id === 'string')
-  ) {
+  const item = value as {
+    type?: unknown;
+    caller?: { type?: unknown; callerId?: unknown };
+  };
+  if (item.type === 'program' || item.type === 'program_output') {
     return true;
   }
 
-  return Object.values(record).some(containsProgrammaticToolCallingState);
+  if (
+    item.type !== 'function_call' &&
+    item.type !== 'function_call_result' &&
+    item.type !== 'shell_call' &&
+    item.type !== 'shell_call_output' &&
+    item.type !== 'apply_patch_call' &&
+    item.type !== 'apply_patch_call_output'
+  ) {
+    return false;
+  }
+
+  return (
+    item.caller?.type === 'program' && typeof item.caller.callerId === 'string'
+  );
 }
 
 function containsSerializedToolSearchState(

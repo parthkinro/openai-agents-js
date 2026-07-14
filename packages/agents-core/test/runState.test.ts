@@ -1035,6 +1035,49 @@ describe('RunState', () => {
     ).rejects.toThrow('does not support Programmatic Tool Calling items');
   });
 
+  it('accepts schema 1.13 application data that resembles PTC items', async () => {
+    const context = new RunContext({
+      nested: { type: 'program_output' },
+    });
+    context.toolInput = { type: 'program', callId: 'tool_input_program' };
+    const agent = new Agent({ name: 'ProgramLikeDataAgent' });
+    const state = new RunState(context, 'input', agent, 1);
+    const rawItem: protocol.FunctionCallResultItem = {
+      type: 'function_call_result',
+      name: 'lookup',
+      callId: 'call_program_like_data',
+      status: 'completed',
+      output: 'done',
+      providerData: {
+        nested: { type: 'program_output' },
+      },
+    };
+    state._generatedItems.push(
+      new RunToolCallOutputItem(rawItem, agent, 'done', {
+        nested: { type: 'program', callId: 'custom_data_program' },
+      }),
+    );
+
+    const serialized = state.toJSON();
+    serialized.$schemaVersion = '1.13';
+
+    const restored = await RunState.fromString(
+      agent,
+      JSON.stringify(serialized),
+    );
+
+    expect(restored._context.context).toEqual(context.context);
+    expect(restored._context.toolInput).toEqual(context.toolInput);
+    expect(restored._generatedItems[0].rawItem.providerData).toEqual(
+      rawItem.providerData,
+    );
+    expect(
+      (restored._generatedItems[0] as RunToolCallOutputItem).customData,
+    ).toEqual({
+      nested: { type: 'program', callId: 'custom_data_program' },
+    });
+  });
+
   it('throws error if schema version is missing or invalid', async () => {
     const context = new RunContext();
     const agent = new Agent({ name: 'Agent1' });
