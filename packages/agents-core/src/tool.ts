@@ -346,6 +346,12 @@ export type FunctionTool<
   ) => Promise<string | Result>;
 
   /**
+   * Optional model-visible fallback for execution errors and pre-execution
+   * failures. Structured tools use this to preserve their output contract.
+   */
+  errorFunction?: ToolErrorFunction<Context, string | Result> | null;
+
+  /**
    * Whether the tool needs human approval before it can be called. If this is true, the run will result in an `interruption` that the
    * program has to resolve by approving or rejecting the tool call.
    */
@@ -1422,7 +1428,11 @@ export type ToolOutputSchema = ZodObjectLike | JsonObjectSchema<any>;
 type ToolExecuteResult<
   TOutputSchema extends ToolOutputSchema | undefined,
   Result,
-> = TOutputSchema extends ZodObjectLike ? ZodInfer<TOutputSchema> : Result;
+> = TOutputSchema extends ZodObjectLike
+  ? ZodInfer<TOutputSchema>
+  : TOutputSchema extends JsonObjectSchema<any>
+    ? unknown
+    : Result;
 
 type ToolFallbackResult<TOutputSchema extends ToolOutputSchema | undefined> =
   TOutputSchema extends undefined
@@ -1461,9 +1471,8 @@ type ToolExecuteFunction<
 ) => Promise<Result> | Result;
 
 /**
- * The function to invoke when an error occurs while running the tool. This can be used to define
- * what the model should receive as tool output in case of an error. It can be used to provide
- * for example additional context or a fallback value.
+ * The function to invoke when an error or model-visible pre-execution rejection
+ * occurs. This can provide additional context or a fallback value.
  *
  * @param context An instance of the current RunContext
  * @param error The error that occurred
@@ -1473,6 +1482,37 @@ type ToolErrorFunction<Context = UnknownContext, Result = string> = (
   error: Error | unknown,
   details?: ToolCallDetails,
 ) => Promise<Result> | Result;
+
+type ToolTimeoutOptions<
+  Context,
+  TOutputSchema extends ToolOutputSchema | undefined,
+> = [TOutputSchema] extends [undefined]
+  ? {
+      /** Optional timeout in milliseconds for each tool call. */
+      timeoutMs?: number;
+      /** Determines whether a timeout becomes a result or an exception. */
+      timeoutBehavior?: FunctionToolTimeoutBehavior;
+      /** Optional formatter for model-visible timeout results. */
+      timeoutErrorFunction?: ToolTimeoutErrorFunction<Context, string>;
+    }
+  : | {
+        /** Optional timeout in milliseconds for each tool call. */
+        timeoutMs?: number;
+        /** Structured tools raise timeout exceptions by default. */
+        timeoutBehavior?: 'raise_exception';
+        timeoutErrorFunction?: never;
+      }
+    | {
+        /** Optional timeout in milliseconds for each tool call. */
+        timeoutMs?: number;
+        /** Return a schema-compatible timeout result. */
+        timeoutBehavior: 'error_as_result';
+        /** Required formatter for schema-compatible timeout results. */
+        timeoutErrorFunction: ToolTimeoutErrorFunction<
+          Context,
+          ToolFallbackResult<TOutputSchema>
+        >;
+      };
 
 const FUNCTION_TOOL_TIMEOUT_BEHAVIORS = [
   'error_as_result',
@@ -1531,11 +1571,11 @@ const MAX_FUNCTION_TOOL_TIMEOUT_MS = 2_147_483_647;
  * @param TParameters The parameters of the tool
  * @param Context The context of the tool
  */
-type StrictToolOptions<
+type StrictToolOptionsBase<
   TParameters extends ToolInputParametersStrict,
   Context = UnknownContext,
   TOutputSchema extends ToolOutputSchema | undefined = undefined,
-> = ToolGuardrailOptions<Context> & {
+> = {
   /**
    * The name of the tool. Must be unique within the agent.
    */
@@ -1586,10 +1626,10 @@ type StrictToolOptions<
   >;
 
   /**
-   * The function to invoke when an error occurs while running the tool.
-   * Tools with an output schema rethrow by default so they cannot emit an
-   * unstructured error string. Provide this callback to return a
-   * schema-compatible fallback.
+   * The function to invoke when an error or model-visible pre-execution
+   * rejection occurs. Tools with an output schema rethrow by default so they
+   * cannot emit an unstructured error string. Provide this callback to return
+   * a schema-compatible fallback.
    */
   errorFunction?: ToolErrorFunction<
     Context,
@@ -1608,26 +1648,6 @@ type StrictToolOptions<
   isEnabled?: ToolEnabledOption<Context>;
 
   /**
-   * Optional timeout in milliseconds for each tool call.
-   */
-  timeoutMs?: number;
-
-  /**
-   * Timeout handling mode. `error_as_result` returns a model-visible message and
-   * `raise_exception` throws `ToolTimeoutError`. Defaults to `raise_exception`
-   * for tools with an output schema and `error_as_result` otherwise.
-   */
-  timeoutBehavior?: FunctionToolTimeoutBehavior;
-
-  /**
-   * Optional formatter used for timeout messages when timeoutBehavior is `error_as_result`.
-   */
-  timeoutErrorFunction?: ToolTimeoutErrorFunction<
-    Context,
-    ToolFallbackResult<TOutputSchema>
-  >;
-
-  /**
    * Optional callback that attaches SDK-only custom data to the emitted tool output item.
    */
   customDataExtractor?: FunctionToolCustomDataExtractor<
@@ -1637,17 +1657,25 @@ type StrictToolOptions<
   >;
 };
 
+type StrictToolOptions<
+  TParameters extends ToolInputParametersStrict,
+  Context = UnknownContext,
+  TOutputSchema extends ToolOutputSchema | undefined = undefined,
+> = StrictToolOptionsBase<TParameters, Context, TOutputSchema> &
+  ToolGuardrailOptions<Context> &
+  ToolTimeoutOptions<Context, TOutputSchema>;
+
 /**
  * The options for a tool that has strict mode disabled.
  *
  * @param TParameters The parameters of the tool
  * @param Context The context of the tool
  */
-type NonStrictToolOptions<
+type NonStrictToolOptionsBase<
   TParameters extends ToolInputParametersNonStrict,
   Context = UnknownContext,
   TOutputSchema extends ToolOutputSchema | undefined = undefined,
-> = ToolGuardrailOptions<Context> & {
+> = {
   /**
    * The name of the tool. Must be unique within the agent.
    */
@@ -1696,10 +1724,10 @@ type NonStrictToolOptions<
   >;
 
   /**
-   * The function to invoke when an error occurs while running the tool.
-   * Tools with an output schema rethrow by default so they cannot emit an
-   * unstructured error string. Provide this callback to return a
-   * schema-compatible fallback.
+   * The function to invoke when an error or model-visible pre-execution
+   * rejection occurs. Tools with an output schema rethrow by default so they
+   * cannot emit an unstructured error string. Provide this callback to return
+   * a schema-compatible fallback.
    */
   errorFunction?: ToolErrorFunction<
     Context,
@@ -1718,26 +1746,6 @@ type NonStrictToolOptions<
   isEnabled?: ToolEnabledOption<Context>;
 
   /**
-   * Optional timeout in milliseconds for each tool call.
-   */
-  timeoutMs?: number;
-
-  /**
-   * Timeout handling mode. `error_as_result` returns a model-visible message and
-   * `raise_exception` throws `ToolTimeoutError`. Defaults to `raise_exception`
-   * for tools with an output schema and `error_as_result` otherwise.
-   */
-  timeoutBehavior?: FunctionToolTimeoutBehavior;
-
-  /**
-   * Optional formatter used for timeout messages when timeoutBehavior is `error_as_result`.
-   */
-  timeoutErrorFunction?: ToolTimeoutErrorFunction<
-    Context,
-    ToolFallbackResult<TOutputSchema>
-  >;
-
-  /**
    * Optional callback that attaches SDK-only custom data to the emitted tool output item.
    */
   customDataExtractor?: FunctionToolCustomDataExtractor<
@@ -1746,6 +1754,14 @@ type NonStrictToolOptions<
     ToolExecuteResult<TOutputSchema, unknown>
   >;
 };
+
+type NonStrictToolOptions<
+  TParameters extends ToolInputParametersNonStrict,
+  Context = UnknownContext,
+  TOutputSchema extends ToolOutputSchema | undefined = undefined,
+> = NonStrictToolOptionsBase<TParameters, Context, TOutputSchema> &
+  ToolGuardrailOptions<Context> &
+  ToolTimeoutOptions<Context, TOutputSchema>;
 
 /**
  * The options for a tool.
@@ -2077,14 +2093,28 @@ export function tool<
     timeoutMs,
     timeoutBehavior,
     timeoutErrorFunction: configuredTimeoutErrorFunction,
-  } = normalizeFunctionToolTimeoutConfig({
+  } = normalizeFunctionToolTimeoutConfig<
+    Context,
+    ToolFallbackResult<TOutputSchema>
+  >({
     toolName: name,
     timeoutMs: options.timeoutMs,
     timeoutBehavior:
       options.timeoutBehavior ??
       (hasOutputSchema ? 'raise_exception' : undefined),
-    timeoutErrorFunction: options.timeoutErrorFunction,
+    timeoutErrorFunction: options.timeoutErrorFunction as
+      | ToolTimeoutErrorFunction<Context, ToolFallbackResult<TOutputSchema>>
+      | undefined,
   });
+  if (
+    hasOutputSchema &&
+    timeoutBehavior === 'error_as_result' &&
+    !configuredTimeoutErrorFunction
+  ) {
+    throw new UserError(
+      `Function tool '${name}' with an output schema requires timeoutErrorFunction when timeoutBehavior is 'error_as_result'.`,
+    );
+  }
   const allowedCallers = normalizeToolAllowedCallers(
     options.allowedCallers,
     name,
@@ -2274,6 +2304,14 @@ export function tool<
     ...(allowedCallers ? { allowedCallers } : {}),
     ...(outputSchema ? { outputSchema } : {}),
     invoke,
+    ...(hasOutputSchema
+      ? {
+          errorFunction: toolErrorFunction as ToolErrorFunction<
+            Context,
+            string | ToolExecuteResult<TOutputSchema, Result>
+          > | null,
+        }
+      : {}),
     needsApproval,
     timeoutMs,
     timeoutBehavior,

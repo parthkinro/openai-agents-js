@@ -41,6 +41,7 @@ import { RunResult, StreamedRunResult } from '../../src/result';
 import { RunState } from '../../src/runState';
 import { handoff } from '../../src/handoff';
 import {
+  InvalidToolInputError,
   InvalidToolOutputError,
   ToolCallError,
   ToolInputGuardrailTripwireTriggered,
@@ -2696,6 +2697,62 @@ describe('executeShellActions', () => {
       expect(state._toolInputGuardrailResults).toHaveLength(1);
     });
 
+    it('maps pre-approval guardrail rejection through a structured error fallback', async () => {
+      const errorFunction = vi.fn(() => ({ status: 'blocked' as const }));
+      const t = tool({
+        name: 'hi',
+        description: 'structured guarded tool',
+        parameters: z.object({}),
+        outputSchema: z.object({ status: z.literal('blocked') }),
+        needsApproval: true,
+        inputGuardrails: [
+          {
+            name: 'structured_pre_approval_blocker',
+            run: async () =>
+              ToolGuardrailFunctionOutputFactory.rejectContent(
+                'blocked before approval',
+              ),
+          },
+        ],
+        errorFunction,
+        execute: vi.fn(async () => ({ status: 'blocked' as const })),
+      }) as unknown as FunctionTool;
+      vi.spyOn(state._context, 'isToolApproved').mockReturnValue(
+        undefined as any,
+      );
+      const preApprovalRunner = new Runner({
+        tracingDisabled: true,
+        toolExecution: { preApprovalInputGuardrails: true },
+      });
+
+      const res = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          preApprovalRunner,
+          state,
+        ),
+      );
+
+      expect(res[0]).toMatchObject({
+        type: 'function_output',
+        output: { status: 'blocked' },
+        runItem: {
+          rawItem: {
+            output: {
+              type: 'text',
+              text: JSON.stringify({ status: 'blocked' }),
+            },
+          },
+        },
+      });
+      expect(errorFunction).toHaveBeenCalledWith(
+        state._context,
+        expect.objectContaining({ message: 'blocked before approval' }),
+        { toolCall },
+      );
+    });
+
     it('runs input guardrails again before execution after approval', async () => {
       const guardrailRun = vi.fn(async () =>
         ToolGuardrailFunctionOutputFactory.allow(),
@@ -2768,6 +2825,49 @@ describe('executeShellActions', () => {
       expect(res[0].runItem).toBeInstanceOf(ToolCallOutputItem);
       expect(needsApproval).not.toHaveBeenCalled();
       expect(invokeSpy).not.toHaveBeenCalled();
+    });
+
+    it('maps approval rejection through a structured error fallback', async () => {
+      const errorFunction = vi.fn(() => ({ status: 'rejected' as const }));
+      const t = tool({
+        name: 'hi',
+        description: 'structured approval tool',
+        parameters: z.object({}),
+        outputSchema: z.object({ status: z.literal('rejected') }),
+        needsApproval: true,
+        errorFunction,
+        execute: vi.fn(async () => ({ status: 'rejected' as const })),
+      }) as unknown as FunctionTool;
+      vi.spyOn(state._context, 'isToolApproved').mockReturnValue(false as any);
+
+      const res = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          runner,
+          state,
+        ),
+      );
+
+      expect(res[0]).toMatchObject({
+        type: 'function_output',
+        output: { status: 'rejected' },
+        runItem: {
+          rawItem: {
+            output: {
+              type: 'text',
+              text: JSON.stringify({ status: 'rejected' }),
+            },
+          },
+        },
+      });
+      expect(errorFunction).toHaveBeenCalledWith(
+        state._context,
+        expect.objectContaining({
+          message: 'Tool execution was not approved.',
+        }),
+        { toolCall },
+      );
     });
 
     it('uses toolErrorFormatter message when approval is false', async () => {
@@ -3555,6 +3655,51 @@ describe('executeShellActions', () => {
       );
     });
 
+    it('maps input guardrail rejection through a structured error fallback', async () => {
+      const errorFunction = vi.fn(() => ({ value: 'blocked' }));
+      const inputGuardrail = defineToolInputGuardrail({
+        name: 'map_structured_rejection',
+        run: async () =>
+          ToolGuardrailFunctionOutputFactory.rejectContent('blocked'),
+      });
+      const t = tool({
+        name: 'structured_input_guardrail_fallback_tool',
+        description: 'tool with structured output',
+        parameters: z.object({}),
+        outputSchema: z.object({ value: z.string() }),
+        errorFunction,
+        execute: vi.fn(async () => ({ value: 'should-not-run' })),
+        inputGuardrails: [inputGuardrail],
+      }) as unknown as FunctionTool;
+
+      const result = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          runner,
+          state,
+        ),
+      );
+
+      expect(result[0]).toMatchObject({
+        type: 'function_output',
+        output: { value: 'blocked' },
+        runItem: {
+          rawItem: {
+            output: {
+              type: 'text',
+              text: JSON.stringify({ value: 'blocked' }),
+            },
+          },
+        },
+      });
+      expect(errorFunction).toHaveBeenCalledWith(
+        state._context,
+        expect.objectContaining({ message: 'blocked' }),
+        { toolCall },
+      );
+    });
+
     it('throws when output guardrail requests exception', async () => {
       const guardrail = defineToolOutputGuardrail({
         name: 'halt',
@@ -3879,6 +4024,79 @@ describe('executeShellActions', () => {
         );
         expect(String(firstResult.output)).toContain('valid JSON');
       }
+    });
+
+    it('maps parse failures through a structured error fallback', async () => {
+      const errorFunction = vi.fn(() => ({ status: 'invalid_input' as const }));
+      const t = tool({
+        name: 'structured_parser',
+        description: 'Parse structured input.',
+        parameters: z.object({ value: z.string() }),
+        outputSchema: z.object({ status: z.literal('invalid_input') }),
+        errorFunction,
+        execute: vi.fn(async () => ({ status: 'invalid_input' as const })),
+      }) as unknown as FunctionTool;
+      const invalidToolCall = {
+        ...toolCall,
+        name: 'structured_parser',
+        arguments: '{',
+      };
+
+      const res = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall: invalidToolCall, tool: t }],
+          runner,
+          state,
+        ),
+      );
+
+      expect(res[0]).toMatchObject({
+        type: 'function_output',
+        output: { status: 'invalid_input' },
+        runItem: {
+          rawItem: {
+            output: {
+              type: 'text',
+              text: JSON.stringify({ status: 'invalid_input' }),
+            },
+          },
+        },
+      });
+      expect(errorFunction).toHaveBeenCalledWith(
+        state._context,
+        expect.objectContaining({ name: 'InvalidToolInputError' }),
+        { toolCall: invalidToolCall },
+      );
+    });
+
+    it('throws structured parse failures without an error fallback', async () => {
+      const t = tool({
+        name: 'structured_parser_without_fallback',
+        description: 'Parse structured input.',
+        parameters: z.object({ value: z.string() }),
+        outputSchema: z.object({ status: z.string() }),
+        execute: vi.fn(async () => ({ status: 'ok' })),
+      }) as unknown as FunctionTool;
+      const invalidToolCall = {
+        ...toolCall,
+        name: 'structured_parser_without_fallback',
+        arguments: '{',
+      };
+
+      const error = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall: invalidToolCall, tool: t }],
+          runner,
+          state,
+        ).catch((caught) => caught),
+      );
+
+      expect(error).toBeInstanceOf(ToolCallError);
+      expect((error as ToolCallError).error).toBeInstanceOf(
+        InvalidToolInputError,
+      );
     });
   });
 

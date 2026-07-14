@@ -18,6 +18,7 @@ import { RunContext } from '../src/runContext';
 import { serializeTool } from '../src/utils/serialize';
 import { FakeEditor, FakeShell } from './stubs';
 import { InvalidToolOutputError, ToolTimeoutError } from '../src/errors';
+import type { JsonObjectSchema } from '../src/types';
 
 interface Bar {
   bar: string;
@@ -76,6 +77,28 @@ describe('Tool', () => {
       allowedCallers: ['programmatic'],
       outputSchema,
     });
+  });
+
+  it('uses unknown for plain JSON Schema output types', () => {
+    const outputSchema: JsonObjectSchema<{
+      value: { type: 'string' };
+    }> = {
+      type: 'object',
+      properties: { value: { type: 'string' } },
+      required: ['value'],
+      additionalProperties: false,
+    };
+    const t = tool({
+      name: 'plain_json_schema_output',
+      description: 'Return structured data.',
+      parameters: z.object({}),
+      outputSchema,
+      execute: async () => ({ value: 'ok' }),
+    });
+
+    expectTypeOf(t.invoke(new RunContext(), '{}')).toEqualTypeOf<
+      Promise<unknown>
+    >();
   });
 
   it('converts a Zod output schema and infers the execute result', () => {
@@ -1146,6 +1169,34 @@ describe('tool.invoke', () => {
         },
       }),
     ).resolves.toEqual({ status: 'call-structured-timeout' });
+  });
+
+  it('requires timeout fallbacks for structured error results', () => {
+    expect(() =>
+      tool({
+        name: 'structured_timeout_without_fallback',
+        description: 'Invalid structured timeout configuration.',
+        parameters: z.object({}),
+        outputSchema: z.object({ status: z.string() }),
+        timeoutMs: 5,
+        timeoutBehavior: 'error_as_result',
+        execute: async () => ({ status: 'done' }),
+        // The cast verifies the runtime boundary in addition to the type test.
+      } as any),
+    ).toThrow(/requires timeoutErrorFunction/);
+
+    const typecheckMissingTimeoutFallback = () =>
+      // @ts-expect-error Structured error results require timeoutErrorFunction.
+      tool({
+        name: 'typecheck_structured_timeout_without_fallback',
+        description: 'Invalid structured timeout configuration.',
+        parameters: z.object({}),
+        outputSchema: z.object({ status: z.string() }),
+        timeoutMs: 5,
+        timeoutBehavior: 'error_as_result',
+        execute: async () => ({ status: 'done' }),
+      });
+    expectTypeOf(typecheckMissingTimeoutFallback).toBeFunction();
   });
 
   it('enforces timeout when invoking FunctionTool directly', async () => {

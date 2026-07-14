@@ -3,6 +3,7 @@ import { Agent, AgentOutputType, ToolsToFinalOutputResult } from '../agent';
 import { setAgentToolParentRunConfigOnDetails } from '../agentToolRunConfig';
 import { consumeAgentToolRunResult } from '../agentToolRunResults';
 import {
+  InvalidToolInputError,
   InvalidToolOutputError,
   ToolCallError,
   ToolTimeoutError,
@@ -369,29 +370,83 @@ function buildApprovalRequestResult<TContext>(
   };
 }
 
-function buildParseErrorResult<TContext>(
+function buildFunctionFailureResult<TContext>(
+  deps: FunctionToolCallDeps<TContext>,
+  toolRun: ToolRunFunction<TContext>,
+  output: unknown,
+): FunctionToolResult<TContext> {
+  return {
+    type: 'function_output' as const,
+    tool: toolRun.tool,
+    output,
+    runItem: new RunToolCallOutputItem(
+      getToolCallOutputItem(toolRun.toolCall, output, {
+        outputSchema: toolRun.tool.outputSchema,
+      }),
+      deps.agent,
+      output,
+    ),
+  };
+}
+
+async function resolveFunctionFailureOutput<TContext>(
   deps: FunctionToolCallDeps<TContext>,
   toolRun: ToolRunFunction<TContext>,
   error: Error,
-): FunctionToolResult<TContext> {
-  const errorMessage = `An error occurred while parsing tool arguments. Please try again with valid JSON. Error: ${error.message}`;
-  return {
-    type: 'function_output',
+  legacyOutput: string,
+): Promise<unknown> {
+  if (!toolRun.tool.outputSchema) {
+    return legacyOutput;
+  }
+
+  if (!toolRun.tool.errorFunction) {
+    throw error;
+  }
+
+  const details: ToolCallDetails = { toolCall: toolRun.toolCall };
+  const output = await toolRun.tool.errorFunction(
+    deps.state._context,
+    error,
+    details,
+  );
+  return validateFunctionToolOutput({
     tool: toolRun.tool,
-    output: errorMessage,
-    runItem: new RunToolCallOutputItem(
-      getToolCallOutputItem(toolRun.toolCall, errorMessage),
-      deps.agent,
-      errorMessage,
-    ),
-  };
+    output,
+    runContext: deps.state._context,
+    details,
+  });
+}
+
+async function buildParseErrorResult<TContext>(
+  deps: FunctionToolCallDeps<TContext>,
+  toolRun: ToolRunFunction<TContext>,
+  error: Error,
+): Promise<FunctionToolResult<TContext>> {
+  const errorMessage = `An error occurred while parsing tool arguments. Please try again with valid JSON. Error: ${error.message}`;
+  const parseError = new InvalidToolInputError(
+    `Invalid input for function tool '${getFunctionToolIdentity(toolRun)}'.`,
+    deps.state,
+    error,
+    {
+      runContext: deps.state._context,
+      input: toolRun.toolCall.arguments,
+      details: { toolCall: toolRun.toolCall },
+    },
+  );
+  const output = await resolveFunctionFailureOutput(
+    deps,
+    toolRun,
+    parseError,
+    errorMessage,
+  );
+  return buildFunctionFailureResult(deps, toolRun, output);
 }
 
 async function buildApprovalRejectionResult<TContext>(
   deps: FunctionToolCallDeps<TContext>,
   toolRun: ToolRunFunction<TContext>,
 ): Promise<FunctionToolResult<TContext>> {
-  const { agent, runner, state, toolErrorFormatter } = deps;
+  const { runner, state, toolErrorFormatter } = deps;
   const toolName = getFunctionToolIdentity(toolRun);
   const traceToolName = getFunctionToolTraceName(toolRun);
   return withToolFunctionSpan(runner, traceToolName, async (span) => {
@@ -414,19 +469,16 @@ async function buildApprovalRejectionResult<TContext>(
       },
     });
 
+    const output = await resolveFunctionFailureOutput(
+      deps,
+      toolRun,
+      new Error(response),
+      response,
+    );
     if (span && runner.config.traceIncludeSensitiveData) {
-      span.spanData.output = response;
+      span.spanData.output = toSmartString(output);
     }
-    return {
-      type: 'function_output' as const,
-      tool: toolRun.tool,
-      output: response,
-      runItem: new RunToolCallOutputItem(
-        getToolCallOutputItem(toolRun.toolCall, response),
-        agent,
-        response,
-      ),
-    };
+    return buildFunctionFailureResult(deps, toolRun, output);
   });
 }
 
@@ -483,21 +535,18 @@ async function handleFunctionApproval<TContext>(
   return buildApprovalRequestResult(deps, toolRun);
 }
 
-function buildInputGuardrailRejectionResult<TContext>(
+async function buildInputGuardrailRejectionResult<TContext>(
   deps: FunctionToolCallDeps<TContext>,
   toolRun: ToolRunFunction<TContext>,
   message: string,
-): FunctionToolResult<TContext> {
-  return {
-    type: 'function_output' as const,
-    tool: toolRun.tool,
-    output: message,
-    runItem: new RunToolCallOutputItem(
-      getToolCallOutputItem(toolRun.toolCall, message),
-      deps.agent,
-      message,
-    ),
-  };
+): Promise<FunctionToolResult<TContext>> {
+  const output = await resolveFunctionFailureOutput(
+    deps,
+    toolRun,
+    new Error(message),
+    message,
+  );
+  return buildFunctionFailureResult(deps, toolRun, output);
 }
 
 async function runFunctionToolInputGuardrails<TContext>({
@@ -559,8 +608,17 @@ async function runApprovedFunctionTool<TContext>(
       let toolDetails: ToolCallDetails = { toolCall: toolRun.toolCall };
       let shouldValidateToolOutput = false;
       if (inputGuardrailResult.type === 'reject') {
-        toolOutput = inputGuardrailResult.message;
-        shouldValidateToolOutput = true;
+        if (toolRun.tool.outputSchema && toolRun.tool.errorFunction) {
+          toolOutput = await resolveFunctionFailureOutput(
+            deps,
+            toolRun,
+            new Error(inputGuardrailResult.message),
+            inputGuardrailResult.message,
+          );
+        } else {
+          toolOutput = inputGuardrailResult.message;
+          shouldValidateToolOutput = true;
+        }
       } else {
         const resumeState = state.getPendingAgentToolRun(
           toolName,
