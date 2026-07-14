@@ -26,6 +26,7 @@ export {
   AgentsError,
   GuardrailExecutionError,
   InputGuardrailTripwireTriggered,
+  InvalidToolOutputError,
   MaxTurnsExceededError,
   ModelBehaviorError,
   ModelRefusalError,
@@ -37,6 +38,7 @@ export {
   UserError,
   SystemError,
 } from './errors';
+export type { ToolOutputErrorContext } from './errors';
 export {
   RunAgentUpdatedStreamEvent,
   RunRawModelStreamEvent,
@@ -226,6 +228,7 @@ export {
   ToolEnabledFunction,
   ToolOptionsWithGuardrails,
   ToolAllowedCaller,
+  ToolAllowedCallers,
 } from './tool';
 export type {
   ClientToolSearchExecutor,

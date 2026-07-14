@@ -1,17 +1,20 @@
 import { getClientToolSearchExecutor } from '@openai/agents-core';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import {
   codeInterpreterTool,
   fileSearchTool,
   imageGenerationTool,
   programmaticToolCallingTool,
   toolSearchTool,
+  type ProgrammaticToolCallingTool,
   webSearchTool,
 } from '../src/tools';
 
 describe('Tool', () => {
   it('programmaticToolCallingTool', () => {
-    expect(programmaticToolCallingTool()).toEqual({
+    const tool = programmaticToolCallingTool();
+    expectTypeOf(tool).toEqualTypeOf<ProgrammaticToolCallingTool>();
+    expect(tool).toEqual({
       type: 'hosted_tool',
       name: 'programmatic_tool_calling',
       providerData: { type: 'programmatic_tool_calling' },
@@ -75,6 +78,17 @@ describe('Tool', () => {
     ).toMatchObject({
       providerData: { allowed_callers: ['programmatic'] },
     });
+  });
+
+  it('codeInterpreterTool rejects invalid allowed callers', () => {
+    expect(() => codeInterpreterTool({ allowedCallers: [] as any })).toThrow(
+      /must contain at least one caller/,
+    );
+    expect(() =>
+      codeInterpreterTool({
+        allowedCallers: ['programmatic', 'programmatic'] as any,
+      }),
+    ).toThrow(/must not contain duplicate callers/);
   });
 
   it('imageGenerationTool with gpt-image-1', () => {

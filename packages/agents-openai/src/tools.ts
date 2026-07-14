@@ -2,10 +2,12 @@ import {
   attachClientToolSearchExecutor,
   HostedTool,
   type ClientToolSearchExecutor,
+  type ToolAllowedCallers,
   UserError,
 } from '@openai/agents-core';
 import type OpenAI from 'openai';
 import { z } from 'zod';
+import { normalizeToolAllowedCallers } from '@openai/agents-core/utils/internal';
 import * as ProviderData from './types/providerData';
 
 // -----------------------------------------------------
@@ -159,12 +161,13 @@ export type CodeInterpreterTool = {
   /**
    * Execution contexts allowed to invoke code interpreter.
    */
-  allowedCallers?: Array<'direct' | 'programmatic'>;
+  allowedCallers?: ToolAllowedCallers;
 };
 
-export type ProgrammaticToolCallingTool = {
-  type: 'programmatic_tool_calling';
-  name?: 'programmatic_tool_calling';
+export type ProgrammaticToolCallingTool = HostedTool & {
+  type: 'hosted_tool';
+  name: 'programmatic_tool_calling';
+  providerData: ProviderData.ProgrammaticToolCallingTool;
 };
 
 export type ToolSearchTool<Context = unknown> = {
@@ -184,12 +187,16 @@ export type ToolSearchTool<Context = unknown> = {
 export function codeInterpreterTool(
   options: Partial<Omit<CodeInterpreterTool, 'type'>> = {},
 ): HostedTool {
+  const allowedCallers = normalizeToolAllowedCallers(
+    options.allowedCallers,
+    options.name ?? 'code_interpreter',
+  );
   const providerData: ProviderData.CodeInterpreterTool = {
     type: 'code_interpreter',
     name: options.name ?? 'code_interpreter',
     container: options.container ?? { type: 'auto' },
     include_outputs: options.includeOutputs,
-    allowed_callers: options.allowedCallers,
+    allowed_callers: allowedCallers ? [...allowedCallers] : undefined,
   };
   return {
     type: 'hosted_tool',
@@ -201,7 +208,7 @@ export function codeInterpreterTool(
 /**
  * Enables Programmatic Tool Calling for eligible Responses API tools.
  */
-export function programmaticToolCallingTool(): HostedTool {
+export function programmaticToolCallingTool(): ProgrammaticToolCallingTool {
   return {
     type: 'hosted_tool',
     name: 'programmatic_tool_calling',

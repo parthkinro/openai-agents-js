@@ -5,4 +5,4 @@
 '@openai/agents-extensions': patch
 ---
 
-feat: add Programmatic Tool Calling with caller-aware runtime and replay support, Zod-derived function output schemas, examples, and explicit unsupported-adapter errors
+feat: add Programmatic Tool Calling with caller-aware replay, runtime-validated Zod outputs, configuration preflight, examples, and explicit unsupported-adapter errors

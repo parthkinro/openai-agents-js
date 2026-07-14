@@ -665,6 +665,108 @@ function assertSupportedToolChoice(
   }
 }
 
+function collectProgrammaticToolConfiguration(tools: ResponsesTool[]): {
+  hasProgrammaticToolCalling: boolean;
+  hasToolSearch: boolean;
+  programmaticEligibleTools: ResponsesTool[];
+  programmaticOnlyTools: ResponsesTool[];
+} {
+  let hasProgrammaticToolCalling = false;
+  let hasToolSearch = false;
+  const programmaticEligibleTools: ResponsesTool[] = [];
+  const programmaticOnlyTools: ResponsesTool[] = [];
+
+  const visit = (tool: ResponsesTool) => {
+    if (tool.type === 'namespace' && Array.isArray(tool.tools)) {
+      for (const nestedTool of tool.tools) {
+        visit(nestedTool);
+      }
+      return;
+    }
+
+    if (tool.type === 'programmatic_tool_calling') {
+      hasProgrammaticToolCalling = true;
+      return;
+    }
+
+    if (tool.type === 'tool_search') {
+      hasToolSearch = true;
+    }
+
+    const allowedCallers = (tool as { allowed_callers?: unknown })
+      .allowed_callers;
+    if (
+      !Array.isArray(allowedCallers) ||
+      !allowedCallers.includes('programmatic')
+    ) {
+      return;
+    }
+
+    programmaticEligibleTools.push(tool);
+    if (!allowedCallers.includes('direct')) {
+      programmaticOnlyTools.push(tool);
+    }
+  };
+
+  for (const tool of tools) {
+    visit(tool);
+  }
+
+  return {
+    hasProgrammaticToolCalling,
+    hasToolSearch,
+    programmaticEligibleTools,
+    programmaticOnlyTools,
+  };
+}
+
+function describeResponsesTool(tool: ResponsesTool): string {
+  const name = (tool as { name?: unknown }).name;
+  return typeof name === 'string' ? name : String(tool.type);
+}
+
+function assertValidProgrammaticToolCallingConfiguration(
+  toolChoice: ToolChoice | undefined,
+  tools: ResponsesTool[],
+  options?: { allowPromptSuppliedTools?: boolean },
+): void {
+  if (options?.allowPromptSuppliedTools === true) {
+    return;
+  }
+
+  const {
+    hasProgrammaticToolCalling,
+    hasToolSearch,
+    programmaticEligibleTools,
+    programmaticOnlyTools,
+  } = collectProgrammaticToolConfiguration(tools);
+  const forcesProgrammaticToolCalling =
+    typeof toolChoice === 'object' &&
+    (toolChoice as { type?: unknown }).type === 'programmatic_tool_calling';
+
+  if (forcesProgrammaticToolCalling && !hasProgrammaticToolCalling) {
+    throw new UserError(
+      'modelSettings.toolChoice="programmatic_tool_calling" requires programmaticToolCallingTool() in the agent tools.',
+    );
+  }
+
+  if (programmaticOnlyTools.length > 0 && !hasProgrammaticToolCalling) {
+    throw new UserError(
+      `Tools restricted to programmatic callers require programmaticToolCallingTool(). Affected tools: ${programmaticOnlyTools.map(describeResponsesTool).join(', ')}.`,
+    );
+  }
+
+  if (
+    hasProgrammaticToolCalling &&
+    !hasToolSearch &&
+    programmaticEligibleTools.length === 0
+  ) {
+    throw new UserError(
+      'programmaticToolCallingTool() requires at least one tool whose allowedCallers includes "programmatic".',
+    );
+  }
+}
+
 function getCompatibleToolChoice(
   toolChoice: ToolChoice | undefined,
   tools: ResponsesTool[],
@@ -1479,7 +1581,9 @@ function convertTool<_TContext = unknown>(
       description: tool.description,
       parameters: tool.parameters,
       strict: tool.strict,
-      ...(tool.allowedCallers ? { allowed_callers: tool.allowedCallers } : {}),
+      ...(tool.allowedCallers
+        ? { allowed_callers: [...tool.allowedCallers] }
+        : {}),
       ...(tool.outputSchema ? { output_schema: tool.outputSchema } : {}),
     };
     if (tool.deferLoading) {
@@ -1520,7 +1624,7 @@ function convertTool<_TContext = unknown>(
         type: 'shell',
         environment: toOpenAIShellEnvironment(tool.environment),
         ...(tool.allowedCallers
-          ? { allowed_callers: tool.allowedCallers }
+          ? { allowed_callers: [...tool.allowedCallers] }
           : {}),
       } as OpenAI.Responses.FunctionShellTool,
       include: undefined,
@@ -1530,7 +1634,7 @@ function convertTool<_TContext = unknown>(
       tool: {
         type: 'apply_patch',
         ...(tool.allowedCallers
-          ? { allowed_callers: tool.allowedCallers }
+          ? { allowed_callers: [...tool.allowedCallers] }
           : {}),
       } as OpenAI.Responses.ApplyPatchTool,
       include: undefined,
@@ -3259,6 +3363,11 @@ export class OpenAIResponsesModel implements Model {
     assertSupportedToolChoice(toolChoice, toolChoiceValidationTools, {
       allowPromptSuppliedTools,
     });
+    assertValidProgrammaticToolCallingConfiguration(
+      toolChoice,
+      toolChoiceValidationTools,
+      { allowPromptSuppliedTools },
+    );
     const { text, ...restOfProviderData } = providerDataWithoutTransport;
 
     if (request.modelSettings.reasoning) {

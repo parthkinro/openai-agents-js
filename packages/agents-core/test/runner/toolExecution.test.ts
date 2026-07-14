@@ -41,6 +41,7 @@ import { RunResult, StreamedRunResult } from '../../src/result';
 import { RunState } from '../../src/runState';
 import { handoff } from '../../src/handoff';
 import {
+  InvalidToolOutputError,
   ToolCallError,
   ToolInputGuardrailTripwireTriggered,
   ToolOutputGuardrailTripwireTriggered,
@@ -3462,6 +3463,36 @@ describe('executeShellActions', () => {
       expect(state._toolOutputGuardrailResults).toHaveLength(0);
     });
 
+    it('rejects input guardrail messages that violate a Zod output schema', async () => {
+      const inputGuardrail = defineToolInputGuardrail({
+        name: 'block_structured_tool',
+        run: async () =>
+          ToolGuardrailFunctionOutputFactory.rejectContent('blocked'),
+      });
+      const t = tool({
+        name: 'structured_input_guardrail_tool',
+        description: 'tool with structured output',
+        parameters: z.object({}),
+        outputSchema: z.object({ value: z.string() }),
+        execute: vi.fn(async () => ({ value: 'should-not-run' })),
+        inputGuardrails: [inputGuardrail],
+      }) as unknown as FunctionTool;
+
+      const error = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          runner,
+          state,
+        ).catch((caught) => caught),
+      );
+
+      expect(error).toBeInstanceOf(ToolCallError);
+      expect((error as ToolCallError).error).toBeInstanceOf(
+        InvalidToolOutputError,
+      );
+    });
+
     it('throws when output guardrail requests exception', async () => {
       const guardrail = defineToolOutputGuardrail({
         name: 'halt',
@@ -3646,6 +3677,67 @@ describe('executeShellActions', () => {
       }
       expect(secondRun).not.toHaveBeenCalled();
       expect(state._toolOutputGuardrailResults).toHaveLength(1);
+    });
+
+    it('rejects guardrail replacements that violate a Zod output schema', async () => {
+      const outputGuardrail = defineToolOutputGuardrail({
+        name: 'replace_structured_output',
+        run: async () =>
+          ToolGuardrailFunctionOutputFactory.rejectContent('redacted'),
+      });
+      const t = tool({
+        name: 'structured_output_guardrail_tool',
+        description: 'tool with structured output',
+        parameters: z.object({}),
+        outputSchema: z.object({ value: z.string() }),
+        execute: vi.fn(async () => ({ value: 'ok' })),
+        outputGuardrails: [outputGuardrail],
+      }) as unknown as FunctionTool;
+
+      const error = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          runner,
+          state,
+        ).catch((caught) => caught),
+      );
+
+      expect(error).toBeInstanceOf(ToolCallError);
+      expect((error as ToolCallError).error).toBeInstanceOf(
+        InvalidToolOutputError,
+      );
+    });
+
+    it('does not validate Zod outputs twice in the runner', async () => {
+      let validationCount = 0;
+      const t = tool({
+        name: 'structured_validation_tool',
+        description: 'tool with a runtime output schema',
+        parameters: z.object({}),
+        outputSchema: z.object({
+          value: z.string().refine(() => {
+            validationCount += 1;
+            return true;
+          }),
+        }),
+        execute: vi.fn(async () => ({ value: 'ok' })),
+      }) as unknown as FunctionTool;
+
+      const result = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          runner,
+          state,
+        ),
+      );
+
+      expect(result[0]).toMatchObject({
+        type: 'function_output',
+        output: { value: 'ok' },
+      });
+      expect(validationCount).toBe(1);
     });
 
     it('propagates nested run result interruptions when provided by agent tools', async () => {

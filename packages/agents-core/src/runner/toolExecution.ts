@@ -21,9 +21,11 @@ import {
   ComputerToolCustomDataContext,
   FunctionToolResult,
   FunctionToolCustomDataContext,
+  ToolCallDetails,
   FUNCTION_TOOL_PARSED_INPUT_CALLBACK,
   ApplyPatchToolCustomDataContext,
   invokeFunctionTool,
+  validateFunctionToolOutput,
   resolveComputer,
   Tool,
 } from '../tool';
@@ -522,14 +524,17 @@ async function runApprovedFunctionTool<TContext>(
 
       let toolOutput: unknown;
       let executedInput = parsedInput;
+      let toolDetails: ToolCallDetails = { toolCall: toolRun.toolCall };
+      let shouldValidateToolOutput = false;
       if (inputGuardrailResult.type === 'reject') {
         toolOutput = inputGuardrailResult.message;
+        shouldValidateToolOutput = true;
       } else {
         const resumeState = state.getPendingAgentToolRun(
           toolName,
           toolRun.toolCall.callId,
         );
-        const toolDetails = {
+        toolDetails = {
           toolCall: toolRun.toolCall,
           resumeState,
           [FUNCTION_TOOL_PARSED_INPUT_CALLBACK]: (input: unknown) => {
@@ -540,7 +545,7 @@ async function runApprovedFunctionTool<TContext>(
           toolDetails,
           agentToolParentRunConfig ?? runner.config,
         );
-        toolOutput = await invokeFunctionTool({
+        const invokedToolOutput = await invokeFunctionTool({
           tool: toolRun.tool,
           runContext: state._context,
           input: toolRun.toolCall.arguments,
@@ -551,10 +556,19 @@ async function runApprovedFunctionTool<TContext>(
           context: state._context,
           agent,
           toolCall: toolRun.toolCall,
-          toolOutput,
+          toolOutput: invokedToolOutput,
           onResult: (result) => {
             state._toolOutputGuardrailResults.push(result);
           },
+        });
+        shouldValidateToolOutput = toolOutput !== invokedToolOutput;
+      }
+      if (shouldValidateToolOutput) {
+        toolOutput = validateFunctionToolOutput({
+          tool: toolRun.tool,
+          output: toolOutput,
+          runContext: state._context,
+          details: toolDetails,
         });
       }
       const stringResult = toSmartString(toolOutput);

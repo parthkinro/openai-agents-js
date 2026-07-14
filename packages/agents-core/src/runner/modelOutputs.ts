@@ -79,7 +79,7 @@ function ensureToolAvailable<T>(
 function handleToolCallAction<
   TTool extends {
     name: string;
-    allowedCallers?: ToolAllowedCaller[];
+    allowedCallers?: readonly ToolAllowedCaller[];
   },
   TAction,
 >({

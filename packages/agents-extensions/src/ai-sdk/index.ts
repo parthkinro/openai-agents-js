@@ -1227,7 +1227,7 @@ export function toolToLanguageV2Tool(
     (tool.type === 'function' ||
       tool.type === 'shell' ||
       tool.type === 'apply_patch') &&
-    tool.allowedCallers?.includes('programmatic')
+    tool.allowedCallers?.some((caller) => caller === 'programmatic')
   ) {
     throw new UserError(
       'The AI SDK adapter does not support Programmatic Tool Calling. Use a Responses API model directly.',

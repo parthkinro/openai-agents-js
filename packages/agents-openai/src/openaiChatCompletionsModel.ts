@@ -438,7 +438,7 @@ export class OpenAIChatCompletionsModel implements Model {
           (tool.type === 'function' ||
             tool.type === 'shell' ||
             tool.type === 'apply_patch') &&
-          tool.allowedCallers?.includes('programmatic')
+          tool.allowedCallers?.some((caller) => caller === 'programmatic')
         ) {
           throw new UserError(
             'Tools callable from Programmatic Tool Calling are only supported with the Responses API.',
