@@ -92,6 +92,38 @@ describe('realtime tool helpers', () => {
     ).toThrowError(/Invalid tool type/);
   });
 
+  it('rejects function tools callable from programs', () => {
+    expect(() =>
+      toRealtimeToolDefinition({
+        ...functionTool,
+        allowedCallers: ['programmatic'],
+      }),
+    ).toThrowError(
+      "Realtime does not support function tool 'echo' with allowedCallers including 'programmatic'. Programmatic Tool Calling is only supported with the Responses API.",
+    );
+
+    expect(() =>
+      toRealtimeToolDefinition({
+        ...functionTool,
+        allowedCallers: ['direct', 'programmatic'],
+      }),
+    ).toThrowError(/Programmatic Tool Calling is only supported/);
+  });
+
+  it('rejects hosted MCP tools callable from programs', () => {
+    expect(() =>
+      toRealtimeToolDefinition({
+        ...hostedMcpTool,
+        providerData: {
+          ...hostedMcpTool.providerData,
+          allowed_callers: ['programmatic'],
+        },
+      }),
+    ).toThrowError(
+      "Realtime does not support hosted MCP tool 'my-mcp' with allowedCallers including 'programmatic'. Programmatic Tool Calling is only supported with the Responses API.",
+    );
+  });
+
   it('rejects invalid hosted MCP approval policies for realtime tools', () => {
     expect(() =>
       toRealtimeToolDefinition({
