@@ -207,16 +207,14 @@ function hasRetainedProgramOwnedItem(
   const retainedResultKeys = new Set<string>();
 
   for (const [index, item] of items.entries()) {
-    if (
-      (pruningIndexes?.has(index) ?? false) ||
-      getProgramCallerId(item) !== programCallId
-    ) {
+    if (getProgramCallerId(item) !== programCallId) {
       continue;
     }
 
     if (
-      isPendingHostedShellCall(item) ||
-      (item && typeof item === 'object' && item.type === 'hosted_tool_call')
+      !(pruningIndexes?.has(index) ?? false) &&
+      (isPendingHostedShellCall(item) ||
+        (item && typeof item === 'object' && item.type === 'hosted_tool_call'))
     ) {
       return true;
     }
