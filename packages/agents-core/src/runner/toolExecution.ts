@@ -2,7 +2,12 @@ import { FunctionCallResultItem } from '../types/protocol';
 import { Agent, AgentOutputType, ToolsToFinalOutputResult } from '../agent';
 import { setAgentToolParentRunConfigOnDetails } from '../agentToolRunConfig';
 import { consumeAgentToolRunResult } from '../agentToolRunResults';
-import { ToolCallError, ToolTimeoutError, UserError } from '../errors';
+import {
+  InvalidToolOutputError,
+  ToolCallError,
+  ToolTimeoutError,
+  UserError,
+} from '../errors';
 import { getTransferMessage, HandoffInputData } from '../handoff';
 import {
   RunHandoffCallItem,
@@ -19,6 +24,7 @@ import {
   ComputerSafetyCheck,
   ComputerSafetyCheckResult,
   ComputerToolCustomDataContext,
+  FunctionTool,
   FunctionToolResult,
   FunctionToolCustomDataContext,
   ToolCallDetails,
@@ -142,8 +148,14 @@ function getComputerTraceInputPayload(
 export function getToolCallOutputItem(
   toolCall: protocol.FunctionCallItem,
   output: string | unknown,
+  options?: {
+    outputSchema?: FunctionTool<any, any, any>['outputSchema'];
+  },
 ): FunctionCallResultItem {
-  const maybeStructuredOutputs = normalizeStructuredToolOutputs(output);
+  const hasOutputSchema = typeof options?.outputSchema !== 'undefined';
+  const maybeStructuredOutputs = hasOutputSchema
+    ? null
+    : normalizeStructuredToolOutputs(output);
 
   if (maybeStructuredOutputs) {
     const structuredItems = maybeStructuredOutputs.map(
@@ -163,6 +175,26 @@ export function getToolCallOutputItem(
     };
   }
 
+  let textOutput: string;
+  if (hasOutputSchema) {
+    try {
+      const serializedOutput = JSON.stringify(output);
+      if (typeof serializedOutput !== 'string') {
+        throw new Error('The output is not a JSON value.');
+      }
+      textOutput = serializedOutput;
+    } catch (error) {
+      throw new InvalidToolOutputError(
+        `Function tool '${toolCall.name}' outputSchema requires a JSON-serializable output.`,
+        undefined,
+        error,
+        { output },
+      );
+    }
+  } else {
+    textOutput = toSmartString(output);
+  }
+
   return {
     type: 'function_call_result',
     name: toolCall.name,
@@ -173,7 +205,7 @@ export function getToolCallOutputItem(
     status: 'completed',
     output: {
       type: 'text',
-      text: toSmartString(output),
+      text: textOutput,
     },
     ...(toolCall.caller ? { caller: toolCall.caller } : {}),
   };
@@ -573,7 +605,9 @@ async function runApprovedFunctionTool<TContext>(
       }
       const stringResult = toSmartString(toolOutput);
 
-      const rawItem = getToolCallOutputItem(toolRun.toolCall, toolOutput);
+      const rawItem = getToolCallOutputItem(toolRun.toolCall, toolOutput, {
+        outputSchema: toolRun.tool.outputSchema,
+      });
       const customData = await maybeExtractToolOutputCustomData(
         toolRun.tool.customDataExtractor,
         {

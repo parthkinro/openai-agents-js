@@ -351,6 +351,32 @@ describe('getToolCallOutputItem', () => {
     });
   });
 
+  it('serializes schema-backed content-like objects as JSON text', () => {
+    const output = getToolCallOutputItem(
+      TEST_MODEL_FUNCTION_CALL,
+      {
+        type: 'text',
+        text: 'schema value',
+      },
+      {
+        outputSchema: {
+          type: 'object',
+          properties: {
+            type: { type: 'string' },
+            text: { type: 'string' },
+          },
+          required: ['type', 'text'],
+          additionalProperties: false,
+        },
+      },
+    );
+
+    expect(output.output).toEqual({
+      type: 'text',
+      text: JSON.stringify({ type: 'text', text: 'schema value' }),
+    });
+  });
+
   it('returns an empty array as plain text output', () => {
     const result = getToolCallOutputItem(TEST_MODEL_FUNCTION_CALL, []);
 
@@ -3000,6 +3026,42 @@ describe('executeShellActions', () => {
       );
       expect(res[0].runItem).toBeInstanceOf(ToolCallOutputItem);
       expect(invokeSpy).toHaveBeenCalled();
+    });
+
+    it('preserves schema-backed content-like outputs as JSON', async () => {
+      const outputSchema = z.object({
+        type: z.literal('text'),
+        text: z.string(),
+      });
+      const t = tool({
+        name: 'hi',
+        description: 'structured content-like output',
+        parameters: z.object({}),
+        outputSchema,
+        execute: async () => ({ type: 'text' as const, text: 'ok' }),
+      }) as unknown as FunctionTool;
+
+      const results = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          runner,
+          state,
+        ),
+      );
+
+      expect(results[0]).toMatchObject({
+        type: 'function_output',
+        output: { type: 'text', text: 'ok' },
+        runItem: {
+          rawItem: {
+            output: {
+              type: 'text',
+              text: JSON.stringify({ type: 'text', text: 'ok' }),
+            },
+          },
+        },
+      });
     });
 
     it('passes a cloned tool call to customDataExtractor', async () => {

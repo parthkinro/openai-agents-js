@@ -1263,9 +1263,15 @@ describe('getInputItems', () => {
   });
 
   it('handles string and fallback outputs for function_call_result', () => {
+    const schemaJson = JSON.stringify({ type: 'text', text: 'ok' });
     const items = getInputItems([
       { type: 'function_call_result', callId: 'str', output: 'ok' },
       { type: 'function_call_result', callId: 'num', output: 42 },
+      {
+        type: 'function_call_result',
+        callId: 'schema',
+        output: { type: 'text', text: schemaJson },
+      },
     ] as any);
 
     expect(items[0]).toMatchObject({
@@ -1277,6 +1283,11 @@ describe('getInputItems', () => {
       type: 'function_call_output',
       call_id: 'num',
       output: '42',
+    });
+    expect(items[2]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'schema',
+      output: schemaJson,
     });
   });
 
