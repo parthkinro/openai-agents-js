@@ -2,6 +2,9 @@ import { RunItem } from '../items';
 import { AgentInputItem } from '../types';
 import { serializeBinary } from '../utils/binary';
 import {
+  getToolResultCorrelationForCall,
+  getToolResultCorrelationForResult,
+  getToolResultCorrelationKey,
   getSimpleToolResultTypeForCall,
   isSimpleToolResultType,
 } from './toolResultCorrelation';
@@ -195,22 +198,40 @@ function getProgramCallerId(item: AgentInputItem): string | undefined {
     : undefined;
 }
 
-function isRetainedProgramOwnedItem(
-  item: AgentInputItem,
-  index: number,
+function hasRetainedProgramOwnedItem(
+  items: AgentInputItem[],
+  programCallId: string,
   pruningIndexes?: Set<number>,
 ): boolean {
-  if (pruningIndexes) {
-    return !pruningIndexes.has(index);
+  const retainedCallKeys = new Set<string>();
+  const retainedResultKeys = new Set<string>();
+
+  for (const [index, item] of items.entries()) {
+    if (
+      (pruningIndexes?.has(index) ?? false) ||
+      getProgramCallerId(item) !== programCallId
+    ) {
+      continue;
+    }
+
+    if (
+      isPendingHostedShellCall(item) ||
+      (item && typeof item === 'object' && item.type === 'hosted_tool_call')
+    ) {
+      return true;
+    }
+
+    const call = getToolResultCorrelationForCall(item);
+    if (call) {
+      retainedCallKeys.add(getToolResultCorrelationKey(call));
+    }
+    const result = getToolResultCorrelationForResult(item);
+    if (result) {
+      retainedResultKeys.add(getToolResultCorrelationKey(result));
+    }
   }
-  if (isPendingHostedShellCall(item)) {
-    return true;
-  }
-  if (item === null || typeof item !== 'object') {
-    return false;
-  }
-  const type = (item as { type?: unknown }).type;
-  return type === 'hosted_tool_call' || isSimpleToolResultType(type);
+
+  return [...retainedCallKeys].some((key) => retainedResultKeys.has(key));
 }
 
 export function dropOrphanToolCalls(
@@ -237,10 +258,10 @@ export function dropOrphanToolCalls(
       continue;
     }
 
-    const hasRetainedOwnedItem = items.some(
-      (candidate, candidateIndex) =>
-        getProgramCallerId(candidate) === item.callId &&
-        isRetainedProgramOwnedItem(candidate, candidateIndex, pruningIndexes),
+    const hasRetainedOwnedItem = hasRetainedProgramOwnedItem(
+      items,
+      item.callId,
+      pruningIndexes,
     );
     if (hasRetainedOwnedItem) {
       activeProgramCallIds.add(item.callId);
@@ -250,9 +271,6 @@ export function dropOrphanToolCalls(
   }
 
   const filtered = items.filter((item, index) => {
-    if (pruningIndexes && !pruningIndexes.has(index)) {
-      return true;
-    }
     if (!item || typeof item !== 'object') {
       return true;
     }
@@ -260,6 +278,9 @@ export function dropOrphanToolCalls(
     if (programCallerId && orphanProgramCallIds.has(programCallerId)) {
       droppedIndexes.add(index);
       return false;
+    }
+    if (pruningIndexes && !pruningIndexes.has(index)) {
+      return true;
     }
     const type = (item as { type?: unknown }).type;
     const callId = (item as { callId?: unknown }).callId;

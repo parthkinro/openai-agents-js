@@ -394,6 +394,30 @@ describe('dropOrphanToolCalls', () => {
     expect(dropOrphanToolCalls([program, call])).toEqual([]);
   });
 
+  it('drops a program with a dangling program-owned result', () => {
+    const program: protocol.ProgramCallItem = {
+      type: 'program',
+      callId: 'program_pending',
+      code: 'return await tools.lookup({});',
+      fingerprint: 'fingerprint:pending',
+    };
+    const functionOutput: protocol.FunctionCallResultItem = {
+      type: 'function_call_result',
+      callId: 'owned_call',
+      name: 'lookup',
+      status: 'completed',
+      output: 'done',
+      caller: { type: 'program', callerId: 'program_pending' },
+    };
+
+    expect(dropOrphanToolCalls([program, functionOutput])).toEqual([]);
+    expect(
+      dropOrphanToolCalls([program, functionOutput], {
+        pruningIndexes: new Set([0]),
+      }),
+    ).toEqual([]);
+  });
+
   it('keeps active programs with program-owned hosted calls', () => {
     const program: protocol.ProgramCallItem = {
       type: 'program',
