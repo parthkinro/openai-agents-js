@@ -2151,6 +2151,58 @@ describe('processModelResponse', () => {
     ).toThrow(ModelBehaviorError);
   });
 
+  it('preserves callers on hosted MCP approval items in sync and async processing', async () => {
+    const mcpTool = hostedMcpTool({
+      serverLabel: 'server',
+      requireApproval: 'always',
+    });
+    const hostedCall: protocol.HostedToolCallItem = {
+      type: 'hosted_tool_call',
+      name: 'mcp_approval_request',
+      id: 'mcpr_program',
+      status: 'in_progress',
+      caller: { type: 'program', callerId: 'call_prog_1' },
+      providerData: {
+        type: 'mcp_approval_request',
+        server_label: 'server',
+        name: 'lookup',
+        id: 'mcpr_program',
+        arguments: '{}',
+      },
+    };
+    const response: ModelResponse = {
+      output: [hostedCall],
+      usage: new Usage(),
+    };
+
+    const syncResult = processModelResponse(
+      response,
+      TEST_AGENT,
+      [mcpTool],
+      [],
+    );
+    const asyncResult = await processModelResponseAsync(
+      response,
+      TEST_AGENT,
+      [mcpTool],
+      [],
+      new RunState(new RunContext(), 'hello', TEST_AGENT, 1),
+      [],
+    );
+
+    for (const result of [syncResult, asyncResult]) {
+      expect(
+        (
+          result.mcpApprovalRequests[0].requestItem
+            .rawItem as protocol.HostedToolCallItem
+        ).caller,
+      ).toEqual({
+        type: 'program',
+        callerId: 'call_prog_1',
+      });
+    }
+  });
+
   it('resolves hosted MCP approval requests from tool_search-loaded servers', () => {
     const toolSearchOutput: protocol.ToolSearchOutputItem = {
       type: 'tool_search_output',

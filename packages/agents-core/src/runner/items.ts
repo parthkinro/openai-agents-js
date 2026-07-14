@@ -175,6 +175,21 @@ function collectCompletedCallIdsByResultType(
   return completed;
 }
 
+function collectProgramCallIds(items: AgentInputItem[]): Set<string> {
+  const callIds = new Set<string>();
+
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || item.type !== 'program') {
+      continue;
+    }
+    if (typeof item.callId === 'string') {
+      callIds.add(item.callId);
+    }
+  }
+
+  return callIds;
+}
+
 function isPendingHostedShellCall(item: AgentInputItem): boolean {
   if (!item || typeof item !== 'object' || item.type !== 'shell_call') {
     return false;
@@ -238,6 +253,7 @@ export function dropOrphanToolCalls(
 ): AgentInputItem[] {
   const pruningIndexes = options?.pruningIndexes;
   const completedByResultType = collectCompletedCallIdsByResultType(items);
+  const programCallIds = collectProgramCallIds(items);
   const droppedIndexes = new Set<number>();
   const activeProgramCallIds = new Set<string>();
   const orphanProgramCallIds = new Set<string>();
@@ -284,6 +300,10 @@ export function dropOrphanToolCalls(
     const callId = (item as { callId?: unknown }).callId;
     if (typeof type !== 'string' || typeof callId !== 'string') {
       return true;
+    }
+    if (type === 'program_output' && !programCallIds.has(callId)) {
+      droppedIndexes.add(index);
+      return false;
     }
     const resultType = getSimpleToolResultTypeForCall(type);
     if (!resultType) {

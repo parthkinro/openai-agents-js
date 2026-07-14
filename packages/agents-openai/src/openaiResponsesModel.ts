@@ -2579,13 +2579,16 @@ function getInputItems(
       ) {
         const providerData =
           item.providerData as ProviderData.HostedMCPApprovalResponse;
-        const entry: OpenAI.Responses.ResponseInputItem.McpApprovalResponse = {
+        const entry: OpenAI.Responses.ResponseInputItem.McpApprovalResponse & {
+          caller?: OpenAIToolCaller;
+        } = {
           ...camelOrSnakeToSnakeCase(providerData),
           type: 'mcp_approval_response',
           id: providerData.id,
           approve: providerData.approve,
           approval_request_id: providerData.approval_request_id,
           reason: providerData.reason,
+          ...(hostedCaller ? { caller: toOpenAIToolCaller(hostedCaller) } : {}),
         };
         return entry;
       } else if (

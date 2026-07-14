@@ -785,6 +785,7 @@ export function processModelResponse<TContext>(
             id: providerData.id,
             status: 'in_progress',
             providerData,
+            ...(output.caller ? { caller: output.caller } : {}),
           },
           agent,
         );
@@ -1131,6 +1132,7 @@ export async function processModelResponseAsync<TContext>(
             id: providerData.id,
             status: 'in_progress',
             providerData,
+            ...(output.caller ? { caller: output.caller } : {}),
           },
           agent,
         );

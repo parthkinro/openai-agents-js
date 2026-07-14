@@ -110,6 +110,22 @@ describe('realtime tool helpers', () => {
     ).toThrowError(/Programmatic Tool Calling is only supported/);
   });
 
+  it('rejects function tools with Responses output schemas', () => {
+    expect(() =>
+      toRealtimeToolDefinition({
+        ...functionTool,
+        outputSchema: {
+          type: 'object',
+          properties: { value: { type: 'string' } },
+          required: ['value'],
+          additionalProperties: false,
+        },
+      }),
+    ).toThrowError(
+      "Realtime does not support function tool 'echo' with outputSchema. Function tool outputSchema is only supported with the Responses API.",
+    );
+  });
+
   it('rejects hosted MCP tools callable from programs', () => {
     expect(() =>
       toRealtimeToolDefinition({

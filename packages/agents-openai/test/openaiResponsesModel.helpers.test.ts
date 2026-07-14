@@ -628,6 +628,48 @@ describe('convertTool', () => {
 });
 
 describe('getInputItems', () => {
+  it('replays caller linkage on MCP approval requests and responses', () => {
+    expect(
+      getInputItems([
+        {
+          type: 'hosted_tool_call',
+          id: 'mcpr_1',
+          name: 'mcp_approval_request',
+          caller: { type: 'program', callerId: 'call_prog_1' },
+          providerData: {
+            type: 'mcp_approval_request',
+            id: 'mcpr_1',
+            name: 'lookup',
+            arguments: '{}',
+            server_label: 'server',
+          },
+        },
+        {
+          type: 'hosted_tool_call',
+          name: 'mcp_approval_response',
+          caller: { type: 'program', callerId: 'call_prog_1' },
+          providerData: {
+            type: 'mcp_approval_response',
+            approve: true,
+            approval_request_id: 'mcpr_1',
+          },
+        },
+      ] as any),
+    ).toMatchObject([
+      {
+        type: 'mcp_approval_request',
+        id: 'mcpr_1',
+        caller: { type: 'program', caller_id: 'call_prog_1' },
+      },
+      {
+        type: 'mcp_approval_response',
+        approve: true,
+        approval_request_id: 'mcpr_1',
+        caller: { type: 'program', caller_id: 'call_prog_1' },
+      },
+    ]);
+  });
+
   it('replays Programmatic Tool Calling items and caller linkage', () => {
     expect(
       getInputItems([

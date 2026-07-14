@@ -352,6 +352,27 @@ describe('extractOutputItemsFromRunItems', () => {
 });
 
 describe('dropOrphanToolCalls', () => {
+  it('drops program outputs without matching program calls', () => {
+    const programOutput: protocol.ProgramCallResultItem = {
+      type: 'program_output',
+      callId: 'program_orphan',
+      output: 'done',
+      status: 'completed',
+    };
+
+    expect(dropOrphanToolCalls([programOutput])).toEqual([]);
+    expect(
+      dropOrphanToolCalls([programOutput], {
+        pruningIndexes: new Set([0]),
+      }),
+    ).toEqual([]);
+    expect(
+      dropOrphanToolCalls([programOutput], {
+        pruningIndexes: new Set(),
+      }),
+    ).toEqual([programOutput]);
+  });
+
   it.each([
     {
       name: 'function',

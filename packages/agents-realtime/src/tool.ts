@@ -104,6 +104,11 @@ export function toRealtimeToolDefinition(
         `Realtime does not support function tool '${tool.name}' with allowedCallers including 'programmatic'. Programmatic Tool Calling is only supported with the Responses API.`,
       );
     }
+    if (typeof tool.outputSchema !== 'undefined') {
+      throw new UserError(
+        `Realtime does not support function tool '${tool.name}' with outputSchema. Function tool outputSchema is only supported with the Responses API.`,
+      );
+    }
     return tool;
   }
   if (tool.type === 'hosted_tool' && tool.name === 'hosted_mcp') {

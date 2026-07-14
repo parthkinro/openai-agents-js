@@ -1805,6 +1805,31 @@ describe('prepareInputItemsWithSession', () => {
     expect(result.sessionItems).toEqual(toAgentInputList('fresh input'));
   });
 
+  it('drops program outputs when callbacks remove their program calls', async () => {
+    const program: AgentInputItem = {
+      type: 'program',
+      callId: 'program_orphan',
+      code: 'return "done";',
+      fingerprint: 'fingerprint:orphan',
+    };
+    const programOutput: AgentInputItem = {
+      type: 'program_output',
+      callId: 'program_orphan',
+      output: 'done',
+      status: 'completed',
+    };
+    const session = new StubSession([program, programOutput]);
+
+    const result = await prepareInputItemsWithSession(
+      'fresh input',
+      session,
+      (history, newItems) => [history[1]!, ...newItems],
+    );
+
+    expect(result.preparedInput).toEqual(toAgentInputList('fresh input'));
+    expect(result.sessionItems).toEqual(toAgentInputList('fresh input'));
+  });
+
   it('drops pending programs with incomplete owned calls from session history', async () => {
     const program: AgentInputItem = {
       type: 'program',
