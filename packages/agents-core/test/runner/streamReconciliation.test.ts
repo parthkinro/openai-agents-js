@@ -56,9 +56,42 @@ describe('stream abort reconciliation', () => {
     });
 
     expect(shouldReconcileStreamAbort(state)).toBe(true);
+    const firstInput = buildAbortReconciliationInput(state);
+    expect(firstInput).toEqual([
+      expect.objectContaining({
+        type: 'program_output',
+        id: expect.stringMatching(/^prog_out_[0-9a-f]{32}$/),
+        callId: 'call_prog_1',
+        status: 'incomplete',
+        output: 'aborted',
+      }),
+    ]);
+    expect(buildAbortReconciliationInput(state)).toEqual(firstInput);
+  });
+
+  it('preserves a streamed program output id during reconciliation', () => {
+    const state = createStreamAbortReconciliationState();
+
+    recordStreamEventForAbortReconciliation(state, {
+      type: 'model',
+      event: {
+        type: 'response.output_item.added',
+        output_index: 1,
+        item: {
+          type: 'program_output',
+          id: 'prog_out_streamed',
+          call_id: 'call_prog_1',
+          result: '',
+          status: 'in_progress',
+        },
+        sequence_number: 1,
+      },
+    });
+
     expect(buildAbortReconciliationInput(state)).toEqual([
       {
         type: 'program_output',
+        id: 'prog_out_streamed',
         callId: 'call_prog_1',
         status: 'incomplete',
         output: 'aborted',

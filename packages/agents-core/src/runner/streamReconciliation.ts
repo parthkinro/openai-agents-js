@@ -1,3 +1,5 @@
+import { randomUUID } from '@openai/agents-core/_shims';
+
 import type { ModelRequest, ModelResponse } from '../model';
 import type {
   FunctionCallItem,
@@ -14,13 +16,13 @@ type PendingStreamedFunctionCall = Pick<
 export type StreamAbortReconciliationState = {
   responseId?: string;
   pendingFunctionCalls: Map<string, PendingStreamedFunctionCall>;
-  pendingProgramCalls: Set<string>;
+  pendingProgramCalls: Map<string, string>;
 };
 
 export function createStreamAbortReconciliationState(): StreamAbortReconciliationState {
   return {
     pendingFunctionCalls: new Map(),
-    pendingProgramCalls: new Set(),
+    pendingProgramCalls: new Map(),
   };
 }
 
@@ -50,6 +52,17 @@ export function recordStreamEventForAbortReconciliation(
   }
 
   if (
+    rawEvent.type === 'response.output_item.added' &&
+    isRecord(rawEvent.item) &&
+    rawEvent.item.type === 'program_output' &&
+    typeof rawEvent.item.call_id === 'string' &&
+    typeof rawEvent.item.id === 'string'
+  ) {
+    state.pendingProgramCalls.set(rawEvent.item.call_id, rawEvent.item.id);
+    return;
+  }
+
+  if (
     rawEvent.type !== 'response.output_item.done' ||
     !isRecord(rawEvent.item)
   ) {
@@ -58,7 +71,9 @@ export function recordStreamEventForAbortReconciliation(
 
   const item = rawEvent.item;
   if (item.type === 'program' && typeof item.call_id === 'string') {
-    state.pendingProgramCalls.add(item.call_id);
+    if (!state.pendingProgramCalls.has(item.call_id)) {
+      state.pendingProgramCalls.set(item.call_id, generateProgramOutputId());
+    }
     return;
   }
 
@@ -117,8 +132,9 @@ export function buildAbortReconciliationInput(
   );
   const programOutputs = Array.from(
     state.pendingProgramCalls,
-    (callId): ProgramCallResultItem => ({
+    ([callId, id]): ProgramCallResultItem => ({
       type: 'program_output',
+      id,
       callId,
       status: 'incomplete',
       output: 'aborted',
@@ -159,4 +175,8 @@ export function markAbortReconciliationComplete(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function generateProgramOutputId(): string {
+  return `prog_out_${randomUUID().replace(/-/g, '')}`;
 }

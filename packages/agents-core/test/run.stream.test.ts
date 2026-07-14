@@ -448,12 +448,13 @@ describe('Runner.run (streaming)', () => {
     expect(model.requests).toHaveLength(2);
     expect(model.requests[1].conversationId).toBe('conv-program-abort');
     expect(getRequestInputItems(model.requests[1])).toEqual([
-      {
+      expect.objectContaining({
         type: 'program_output',
+        id: expect.stringMatching(/^prog_out_[0-9a-f]{32}$/),
         callId: 'call_prog_abort',
         status: 'incomplete',
         output: 'aborted',
-      },
+      }),
     ]);
   });
 
