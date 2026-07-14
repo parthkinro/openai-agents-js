@@ -352,6 +352,48 @@ describe('extractOutputItemsFromRunItems', () => {
 });
 
 describe('dropOrphanToolCalls', () => {
+  it.each([
+    {
+      name: 'function',
+      call: {
+        type: 'function_call',
+        callId: 'owned_call',
+        name: 'lookup',
+        arguments: '{}',
+        caller: { type: 'program', callerId: 'program_pending' },
+      } satisfies protocol.FunctionCallItem,
+    },
+    {
+      name: 'shell',
+      call: {
+        type: 'shell_call',
+        callId: 'owned_call',
+        status: 'completed',
+        action: { commands: ['echo pending'] },
+        caller: { type: 'program', callerId: 'program_pending' },
+      } satisfies protocol.ShellCallItem,
+    },
+    {
+      name: 'apply patch',
+      call: {
+        type: 'apply_patch_call',
+        callId: 'owned_call',
+        status: 'completed',
+        operation: { type: 'delete_file', path: 'pending.txt' },
+        caller: { type: 'program', callerId: 'program_pending' },
+      } satisfies protocol.ApplyPatchCallItem,
+    },
+  ])('drops a program with an orphan program-owned $name call', ({ call }) => {
+    const program: protocol.ProgramCallItem = {
+      type: 'program',
+      callId: 'program_pending',
+      code: 'return await tools.lookup({});',
+      fingerprint: 'fingerprint:pending',
+    };
+
+    expect(dropOrphanToolCalls([program, call])).toEqual([]);
+  });
+
   it('prunes only the indexes explicitly marked for pruning', () => {
     const historyShell: AgentInputItem = {
       type: 'shell_call',

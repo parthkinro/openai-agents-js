@@ -195,6 +195,24 @@ function getProgramCallerId(item: AgentInputItem): string | undefined {
     : undefined;
 }
 
+function isRetainedProgramOwnedItem(
+  item: AgentInputItem,
+  index: number,
+  pruningIndexes?: Set<number>,
+): boolean {
+  if (pruningIndexes) {
+    return !pruningIndexes.has(index);
+  }
+  if (isPendingHostedShellCall(item)) {
+    return true;
+  }
+  return (
+    item !== null &&
+    typeof item === 'object' &&
+    isSimpleToolResultType((item as { type?: unknown }).type)
+  );
+}
+
 export function dropOrphanToolCalls(
   items: AgentInputItem[],
   options?: { pruningIndexes?: Set<number> },
@@ -219,12 +237,12 @@ export function dropOrphanToolCalls(
       continue;
     }
 
-    const hasUnprunedOwnedItem = items.some(
+    const hasRetainedOwnedItem = items.some(
       (candidate, candidateIndex) =>
-        (!pruningIndexes || !pruningIndexes.has(candidateIndex)) &&
-        getProgramCallerId(candidate) === item.callId,
+        getProgramCallerId(candidate) === item.callId &&
+        isRetainedProgramOwnedItem(candidate, candidateIndex, pruningIndexes),
     );
-    if (hasUnprunedOwnedItem) {
+    if (hasRetainedOwnedItem) {
       activeProgramCallIds.add(item.callId);
     } else {
       orphanProgramCallIds.add(item.callId);
