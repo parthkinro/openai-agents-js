@@ -181,6 +181,20 @@ function isPendingHostedShellCall(item: AgentInputItem): boolean {
   return status === undefined || status === 'in_progress';
 }
 
+function getProgramCallerId(item: AgentInputItem): string | undefined {
+  if (!item || typeof item !== 'object' || !('caller' in item)) {
+    return undefined;
+  }
+  const caller = (item as { caller?: unknown }).caller;
+  if (!caller || typeof caller !== 'object') {
+    return undefined;
+  }
+  const candidate = caller as { type?: unknown; callerId?: unknown };
+  return candidate.type === 'program' && typeof candidate.callerId === 'string'
+    ? candidate.callerId
+    : undefined;
+}
+
 export function dropOrphanToolCalls(
   items: AgentInputItem[],
   options?: { pruningIndexes?: Set<number> },
@@ -188,6 +202,34 @@ export function dropOrphanToolCalls(
   const pruningIndexes = options?.pruningIndexes;
   const completedByResultType = collectCompletedCallIdsByResultType(items);
   const droppedIndexes = new Set<number>();
+  const activeProgramCallIds = new Set<string>();
+  const orphanProgramCallIds = new Set<string>();
+
+  for (const [index, item] of items.entries()) {
+    if (pruningIndexes && !pruningIndexes.has(index)) {
+      continue;
+    }
+    if (!item || typeof item !== 'object' || item.type !== 'program') {
+      continue;
+    }
+    if (
+      completedByResultType.get('program_output')?.has(item.callId) ??
+      false
+    ) {
+      continue;
+    }
+
+    const hasUnprunedOwnedItem = items.some(
+      (candidate, candidateIndex) =>
+        (!pruningIndexes || !pruningIndexes.has(candidateIndex)) &&
+        getProgramCallerId(candidate) === item.callId,
+    );
+    if (hasUnprunedOwnedItem) {
+      activeProgramCallIds.add(item.callId);
+    } else {
+      orphanProgramCallIds.add(item.callId);
+    }
+  }
 
   const filtered = items.filter((item, index) => {
     if (pruningIndexes && !pruningIndexes.has(index)) {
@@ -195,6 +237,11 @@ export function dropOrphanToolCalls(
     }
     if (!item || typeof item !== 'object') {
       return true;
+    }
+    const programCallerId = getProgramCallerId(item);
+    if (programCallerId && orphanProgramCallIds.has(programCallerId)) {
+      droppedIndexes.add(index);
+      return false;
     }
     const type = (item as { type?: unknown }).type;
     const callId = (item as { callId?: unknown }).callId;
@@ -206,6 +253,9 @@ export function dropOrphanToolCalls(
       return true;
     }
     if (isPendingHostedShellCall(item)) {
+      return true;
+    }
+    if (type === 'program' && activeProgramCallIds.has(callId)) {
       return true;
     }
     if (completedByResultType.get(resultType)?.has(callId) ?? false) {

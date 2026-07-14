@@ -39,6 +39,106 @@ describe('prepareModelInputItems', () => {
     ]);
   });
 
+  it('drops orphan generated programs and keeps completed programs', () => {
+    const agent = new Agent({ name: 'HelperAgent' });
+    const orphanProgram = new RunToolCallItem(
+      {
+        type: 'program',
+        callId: 'program_orphan',
+        code: 'return "orphan";',
+        fingerprint: 'fingerprint:orphan',
+      } satisfies protocol.ProgramCallItem,
+      agent,
+    );
+    const completedProgram = new RunToolCallItem(
+      {
+        type: 'program',
+        callId: 'program_completed',
+        code: 'return "completed";',
+        fingerprint: 'fingerprint:completed',
+      } satisfies protocol.ProgramCallItem,
+      agent,
+    );
+    const programOutput = new RunToolCallOutputItem(
+      {
+        type: 'program_output',
+        callId: 'program_completed',
+        output: 'completed',
+        status: 'completed',
+      } satisfies protocol.ProgramCallResultItem,
+      agent,
+      'completed',
+    );
+
+    const prepared = prepareModelInputItems('hello', [
+      orphanProgram,
+      completedProgram,
+      programOutput,
+    ]);
+
+    expect(prepared).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: 'hello',
+      },
+      completedProgram.rawItem,
+      programOutput.rawItem,
+    ]);
+  });
+
+  it('keeps programs that are waiting on program-owned tool calls', () => {
+    const agent = new Agent({ name: 'HelperAgent' });
+    const program = new RunToolCallItem(
+      {
+        type: 'program',
+        callId: 'program_pending',
+        code: 'return await tools.lookup({ key: "value" });',
+        fingerprint: 'fingerprint:pending',
+      } satisfies protocol.ProgramCallItem,
+      agent,
+    );
+    const functionCall = new RunToolCallItem(
+      {
+        type: 'function_call',
+        callId: 'lookup_pending',
+        name: 'lookup',
+        arguments: '{"key":"value"}',
+        caller: { type: 'program', callerId: 'program_pending' },
+      } satisfies protocol.FunctionCallItem,
+      agent,
+    );
+    const functionOutput = new RunToolCallOutputItem(
+      {
+        type: 'function_call_result',
+        callId: 'lookup_pending',
+        name: 'lookup',
+        status: 'completed',
+        output: 'value',
+        caller: { type: 'program', callerId: 'program_pending' },
+      } satisfies protocol.FunctionCallResultItem,
+      agent,
+      'value',
+    );
+
+    const prepared = prepareModelInputItems('hello', [
+      program,
+      functionCall,
+      functionOutput,
+    ]);
+
+    expect(prepared).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: 'hello',
+      },
+      program.rawItem,
+      functionCall.rawItem,
+      functionOutput.rawItem,
+    ]);
+  });
+
   it('keeps generated pending hosted shell calls without outputs', () => {
     const agent = new Agent({ name: 'HelperAgent' });
     const shellCall = new RunToolCallItem(

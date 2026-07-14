@@ -1745,6 +1745,51 @@ describe('prepareInputItemsWithSession', () => {
     expect(result.sessionItems).toEqual(toAgentInputList('fresh input'));
   });
 
+  it('drops orphan programs left by session history callbacks', async () => {
+    const program: AgentInputItem = {
+      type: 'program',
+      callId: 'program_1',
+      code: 'return "done";',
+      fingerprint: 'fingerprint:program-1',
+    };
+    const programOutput: AgentInputItem = {
+      type: 'program_output',
+      callId: 'program_1',
+      output: 'done',
+      status: 'completed',
+    };
+    const functionCall: AgentInputItem = {
+      type: 'function_call',
+      callId: 'lookup_1',
+      name: 'lookup',
+      arguments: '{}',
+      caller: { type: 'program', callerId: 'program_1' },
+    };
+    const functionOutput: AgentInputItem = {
+      type: 'function_call_result',
+      callId: 'lookup_1',
+      name: 'lookup',
+      status: 'completed',
+      output: 'done',
+      caller: { type: 'program', callerId: 'program_1' },
+    };
+    const session = new StubSession([
+      program,
+      functionCall,
+      functionOutput,
+      programOutput,
+    ]);
+
+    const result = await prepareInputItemsWithSession(
+      'fresh input',
+      session,
+      (history, newItems) => [...history.slice(0, -1), ...newItems],
+    );
+
+    expect(result.preparedInput).toEqual(toAgentInputList('fresh input'));
+    expect(result.sessionItems).toEqual(toAgentInputList('fresh input'));
+  });
+
   it('preserves caller pending shell calls when callbacks also surface orphan history', async () => {
     const historyShell: AgentInputItem = {
       type: 'shell_call',
