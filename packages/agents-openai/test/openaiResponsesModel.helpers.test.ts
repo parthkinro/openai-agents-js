@@ -653,6 +653,11 @@ describe('getInputItems', () => {
           callId: 'call_prog_1',
           output: 'ok',
           status: 'completed',
+          providerData: {
+            output: 'stale-output',
+            result: 'stale-result',
+            customField: 'kept',
+          },
         },
       ]),
     ).toEqual([
@@ -677,6 +682,7 @@ describe('getInputItems', () => {
         call_id: 'call_prog_1',
         result: 'ok',
         status: 'completed',
+        custom_field: 'kept',
       },
     ]);
   });

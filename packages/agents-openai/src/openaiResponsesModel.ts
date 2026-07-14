@@ -2091,6 +2091,7 @@ function getInputItems(
           'call_id',
           'callId',
           'output',
+          'result',
           'status',
         ]),
       } satisfies OpenAI.Responses.ResponseInputItem.ProgramOutput;

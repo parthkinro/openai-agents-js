@@ -1037,6 +1037,63 @@ describe('Sandbox memory generation', () => {
     expect(serialized).not.toContain('RAW_REASONING_SECRET');
   });
 
+  it('preserves Programmatic Tool Calling items in rollout payloads', async () => {
+    const session = new MemorySession();
+    const agent = new SandboxAgent({
+      name: 'sandbox',
+      model: new FakeModel([
+        {
+          output: [
+            {
+              type: 'program',
+              id: 'prog_1',
+              callId: 'call_prog_1',
+              code: 'text("PROGRAM_RESULT")',
+              fingerprint: 'fp_1',
+            },
+            {
+              type: 'program_output',
+              id: 'prog_out_1',
+              callId: 'call_prog_1',
+              output: 'PROGRAM_RESULT',
+              status: 'completed',
+            },
+            fakeModelMessage('Program completed.'),
+          ],
+          usage: new Usage(),
+        },
+      ]),
+      capabilities: [
+        memory({
+          read: false,
+          generate: createNoopMemoryGenerationConfig(),
+        }),
+      ],
+    });
+
+    await run(agent, 'Run the program.', { sandbox: { session } });
+
+    const rolloutFile = [...session.files.keys()].find(
+      (path) => path.startsWith('sessions/') && path.endsWith('.jsonl'),
+    );
+    expect(rolloutFile).toBeDefined();
+    const payload = JSON.parse(session.files.get(rolloutFile!) ?? '{}');
+
+    expect(payload.generated_items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'program',
+          callId: 'call_prog_1',
+        }),
+        expect.objectContaining({
+          type: 'program_output',
+          callId: 'call_prog_1',
+          output: 'PROGRAM_RESULT',
+        }),
+      ]),
+    );
+  });
+
   it('clears active memory when handing off to a non-sandbox agent', async () => {
     const session = new MemorySession();
     const nonSandboxAgent = new Agent({

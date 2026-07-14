@@ -22,6 +22,7 @@ import {
   HostedMCPTool,
   ShellTool,
   Tool,
+  type ToolAllowedCaller,
   getClientToolSearchExecutor,
   getToolSearchRuntimeToolKey,
 } from '../tool';
@@ -74,9 +75,38 @@ function ensureToolAvailable<T>(
   return tool;
 }
 
+function ensureToolCallerAllowed(
+  toolCall: protocol.ToolCallItem,
+  allowedCallers: readonly ToolAllowedCaller[] | undefined,
+  toolName: string,
+  agent: Agent<any, any>,
+): void {
+  const caller: ToolAllowedCaller =
+    'caller' in toolCall && toolCall.caller?.type === 'program'
+      ? 'programmatic'
+      : 'direct';
+  const effectiveAllowedCallers = allowedCallers ?? ['direct'];
+  if (effectiveAllowedCallers.includes(caller)) {
+    return;
+  }
+
+  const message = `Model invoked tool ${toolName} with caller ${caller}, but the tool allows only ${JSON.stringify(effectiveAllowedCallers)}.`;
+  addErrorToCurrentSpan({
+    message,
+    data: {
+      agent_name: agent.name,
+      tool_name: toolName,
+      tool_call_id: 'callId' in toolCall ? toolCall.callId : undefined,
+      tool_caller: caller,
+    },
+  });
+  throw new ModelBehaviorError(message);
+}
+
 function handleToolCallAction<
   TTool extends {
     name: string;
+    allowedCallers?: ToolAllowedCaller[];
   },
   TAction,
 >({
@@ -101,6 +131,12 @@ function handleToolCallAction<
   buildAction: (resolvedTool: TTool) => TAction;
 }) {
   const resolvedTool = ensureToolAvailable(tool, errorMessage, errorData);
+  ensureToolCallerAllowed(
+    output,
+    resolvedTool.allowedCallers,
+    resolvedTool.name,
+    agent,
+  );
   items.push(new RunToolCallItem(output, agent));
   toolsUsed.push(resolvedTool.name);
   actions.push(buildAction(resolvedTool));
@@ -812,6 +848,12 @@ export function processModelResponse<TContext>(
         'Model produced shell action without a shell tool.',
         { agent_name: agent.name },
       );
+      ensureToolCallerAllowed(
+        output,
+        resolvedShellTool.allowedCallers,
+        resolvedShellTool.name,
+        agent,
+      );
       items.push(new RunToolCallItem(output, agent));
       toolsUsed.push(resolvedShellTool.name);
       const shellEnvironmentType =
@@ -888,6 +930,12 @@ export function processModelResponse<TContext>(
         functionToolsNotFound,
       );
     } else if (resolved.type === 'handoff') {
+      ensureToolCallerAllowed(
+        output,
+        undefined,
+        resolved.handoff.toolName,
+        agent,
+      );
       recordHandoffRequest(
         output,
         resolved.handoff,
@@ -897,6 +945,12 @@ export function processModelResponse<TContext>(
         runHandoffs,
       );
     } else {
+      ensureToolCallerAllowed(
+        output,
+        resolved.tool.allowedCallers,
+        getFunctionToolQualifiedName(resolved.tool) ?? resolved.tool.name,
+        agent,
+      );
       ensureDeferredFunctionToolLoaded(
         output,
         resolved.tool,
@@ -1138,6 +1192,12 @@ export async function processModelResponseAsync<TContext>(
         'Model produced shell action without a shell tool.',
         { agent_name: agent.name },
       );
+      ensureToolCallerAllowed(
+        output,
+        resolvedShellTool.allowedCallers,
+        resolvedShellTool.name,
+        agent,
+      );
       items.push(new RunToolCallItem(output, agent));
       toolsUsed.push(resolvedShellTool.name);
       const shellEnvironmentType =
@@ -1210,6 +1270,12 @@ export async function processModelResponseAsync<TContext>(
         functionToolsNotFound,
       );
     } else if (resolved.type === 'handoff') {
+      ensureToolCallerAllowed(
+        output,
+        undefined,
+        resolved.handoff.toolName,
+        agent,
+      );
       recordHandoffRequest(
         output,
         resolved.handoff,
@@ -1219,6 +1285,12 @@ export async function processModelResponseAsync<TContext>(
         runHandoffs,
       );
     } else {
+      ensureToolCallerAllowed(
+        output,
+        resolved.tool.allowedCallers,
+        getFunctionToolQualifiedName(resolved.tool) ?? resolved.tool.name,
+        agent,
+      );
       ensureDeferredFunctionToolLoaded(
         output,
         resolved.tool,

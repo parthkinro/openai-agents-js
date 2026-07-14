@@ -275,6 +275,12 @@ export function itemsToLanguageV2Messages(
   };
 
   for (const item of collapsedItems) {
+    if ('caller' in item && item.caller?.type === 'program') {
+      throw new UserError(
+        'The AI SDK adapter does not support Programmatic Tool Calling history. Use a Responses API model directly.',
+      );
+    }
+
     if (item.type === 'message' || typeof item.type === 'undefined') {
       const { role, content, providerData } = item;
       if (role === 'system') {

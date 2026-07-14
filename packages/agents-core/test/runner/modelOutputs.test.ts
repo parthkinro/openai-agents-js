@@ -104,6 +104,152 @@ describe('processModelResponse', () => {
     expect(result.toolsUsed).toEqual(['programmatic_tool_calling']);
   });
 
+  it('rejects function and handoff calls from disallowed callers', () => {
+    const programOnlyFunction = tool({
+      name: 'program_only',
+      description: 'Program-only function.',
+      parameters: z.object({}),
+      allowedCallers: ['programmatic'],
+      execute: async () => 'ok',
+    });
+    const directFunctionCall: protocol.FunctionCallItem = {
+      type: 'function_call',
+      callId: 'call_direct',
+      name: 'program_only',
+      arguments: '{}',
+    };
+    expect(() =>
+      processModelResponse(
+        { output: [directFunctionCall], usage: new Usage() },
+        TEST_AGENT,
+        [programOnlyFunction],
+        [],
+      ),
+    ).toThrow(/caller direct/);
+
+    const programFunctionCall: protocol.FunctionCallItem = {
+      ...TEST_MODEL_FUNCTION_CALL,
+      caller: { type: 'program', callerId: 'call_program' },
+    };
+    expect(() =>
+      processModelResponse(
+        { output: [programFunctionCall], usage: new Usage() },
+        TEST_AGENT,
+        [TEST_TOOL],
+        [],
+      ),
+    ).toThrow(/caller programmatic/);
+
+    const target = new Agent({ name: 'Target' });
+    const targetHandoff = handoff(target);
+    const programHandoffCall: protocol.FunctionCallItem = {
+      type: 'function_call',
+      callId: 'call_handoff',
+      name: targetHandoff.toolName,
+      arguments: '{}',
+      caller: { type: 'program', callerId: 'call_program' },
+    };
+    expect(() =>
+      processModelResponse(
+        { output: [programHandoffCall], usage: new Usage() },
+        TEST_AGENT,
+        [],
+        [targetHandoff],
+      ),
+    ).toThrow(/caller programmatic/);
+  });
+
+  it('rejects shell and apply_patch calls from disallowed callers', () => {
+    const programShellCall: protocol.ShellCallItem = {
+      type: 'shell_call',
+      callId: 'call_shell',
+      action: { commands: ['echo hi'] },
+      caller: { type: 'program', callerId: 'call_program' },
+    };
+    expect(() =>
+      processModelResponse(
+        { output: [programShellCall], usage: new Usage() },
+        TEST_AGENT,
+        [shellTool({ shell: new FakeShell() })],
+        [],
+      ),
+    ).toThrow(/caller programmatic/);
+
+    const directApplyPatchCall: protocol.ApplyPatchCallItem = {
+      type: 'apply_patch_call',
+      callId: 'call_patch',
+      status: 'completed',
+      operation: { type: 'delete_file', path: 'temp.txt' },
+    };
+    expect(() =>
+      processModelResponse(
+        { output: [directApplyPatchCall], usage: new Usage() },
+        TEST_AGENT,
+        [
+          applyPatchTool({
+            editor: new FakeEditor(),
+            allowedCallers: ['programmatic'],
+          }),
+        ],
+        [],
+      ),
+    ).toThrow(/caller direct/);
+  });
+
+  it('queues function, shell, and apply_patch calls from allowed program callers', () => {
+    const programFunction = tool({
+      name: 'program_function',
+      description: 'Program-callable function.',
+      parameters: z.object({}),
+      allowedCallers: ['programmatic'],
+      execute: async () => 'ok',
+    });
+    const programShell = shellTool({
+      shell: new FakeShell(),
+      allowedCallers: ['programmatic'],
+    });
+    const programApplyPatch = applyPatchTool({
+      editor: new FakeEditor(),
+      allowedCallers: ['programmatic'],
+    });
+    const caller = { type: 'program' as const, callerId: 'call_program' };
+
+    const result = processModelResponse(
+      {
+        output: [
+          {
+            type: 'function_call',
+            callId: 'call_function',
+            name: 'program_function',
+            arguments: '{}',
+            caller,
+          },
+          {
+            type: 'shell_call',
+            callId: 'call_shell',
+            action: { commands: ['echo hi'] },
+            caller,
+          },
+          {
+            type: 'apply_patch_call',
+            callId: 'call_patch',
+            status: 'completed',
+            operation: { type: 'delete_file', path: 'temp.txt' },
+            caller,
+          },
+        ],
+        usage: new Usage(),
+      },
+      TEST_AGENT,
+      [programFunction, programShell, programApplyPatch],
+      [],
+    );
+
+    expect(result.functions).toHaveLength(1);
+    expect(result.shellActions).toHaveLength(1);
+    expect(result.applyPatchActions).toHaveLength(1);
+  });
+
   it('processes message outputs and tool calls', () => {
     const modelResponse: ModelResponse = TEST_MODEL_RESPONSE_WITH_FUNCTION;
 
@@ -785,6 +931,71 @@ describe('processModelResponse', () => {
     });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(state.getToolSearchRuntimeTools(agent)).toEqual([lookupAccount]);
+  });
+
+  it('rejects disallowed callers for tools loaded by custom client tool_search', async () => {
+    const programOnlyLookup = tool({
+      name: 'lookup_account',
+      description: 'Look up an account.',
+      parameters: z.object({ accountId: z.string() }),
+      allowedCallers: ['programmatic'],
+      execute: async () => 'account',
+    });
+    const clientToolSearch = attachClientToolSearchExecutor(
+      {
+        type: 'hosted_tool',
+        name: 'tool_search',
+        providerData: {
+          type: 'tool_search',
+          execution: 'client',
+          parameters: {
+            type: 'object',
+            properties: {
+              namespaceHints: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+            required: ['namespaceHints'],
+            additionalProperties: false,
+          },
+        },
+      },
+      async () => programOnlyLookup,
+    );
+    const agent = new Agent({ name: 'CustomClientToolSearchAgent' });
+    const state = new RunState(new RunContext(), 'hello', agent, 3);
+
+    await expect(
+      processModelResponseAsync(
+        {
+          output: [
+            {
+              type: 'tool_search_call',
+              id: 'ts_call_lookup',
+              status: 'completed',
+              arguments: { namespaceHints: ['crm'] },
+              providerData: {
+                call_id: 'call_tool_search_lookup',
+                execution: 'client',
+              },
+            },
+            {
+              type: 'function_call',
+              callId: 'call_lookup_account',
+              name: 'lookup_account',
+              arguments: '{"accountId":"acct_42"}',
+            },
+          ],
+          usage: new Usage(),
+        },
+        agent,
+        [clientToolSearch],
+        [],
+        state,
+        [],
+      ),
+    ).rejects.toThrow(/caller direct/);
   });
 
   it('does not auto-execute tool_search calls that explicitly request server execution', () => {

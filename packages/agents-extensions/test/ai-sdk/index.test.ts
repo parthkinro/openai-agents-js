@@ -1029,6 +1029,33 @@ describe('itemsToLanguageV2Messages', () => {
     expect(() => itemsToLanguageV2Messages(stubModel({}), items)).toThrow();
   });
 
+  test('rejects Programmatic Tool Calling caller history', () => {
+    const caller = { type: 'program' as const, callerId: 'call_program' };
+    expect(() =>
+      itemsToLanguageV2Messages(stubModel({}), [
+        {
+          type: 'function_call',
+          callId: 'call_function',
+          name: 'lookup',
+          arguments: '{}',
+          caller,
+        },
+      ]),
+    ).toThrow(/does not support Programmatic Tool Calling history/);
+    expect(() =>
+      itemsToLanguageV2Messages(stubModel({}), [
+        {
+          type: 'function_call_result',
+          callId: 'call_function',
+          name: 'lookup',
+          status: 'completed',
+          output: 'ok',
+          caller,
+        },
+      ]),
+    ).toThrow(/does not support Programmatic Tool Calling history/);
+  });
+
   test('throws on computer tool calls and results', () => {
     expect(() =>
       itemsToLanguageV2Messages(stubModel({}), [
