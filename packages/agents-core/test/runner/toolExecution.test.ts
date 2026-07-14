@@ -3625,7 +3625,7 @@ describe('executeShellActions', () => {
       expect(state._toolOutputGuardrailResults).toHaveLength(0);
     });
 
-    it('rejects input guardrail messages that violate a Zod output schema', async () => {
+    it('rejects input guardrail messages for Zod output schemas without a fallback', async () => {
       const inputGuardrail = defineToolInputGuardrail({
         name: 'block_structured_tool',
         run: async () =>
@@ -3650,9 +3650,46 @@ describe('executeShellActions', () => {
       );
 
       expect(error).toBeInstanceOf(ToolCallError);
-      expect((error as ToolCallError).error).toBeInstanceOf(
-        InvalidToolOutputError,
+      expect((error as ToolCallError).error).toMatchObject({
+        message: 'blocked',
+      });
+    });
+
+    it('rejects input guardrail messages for plain JSON output schemas without a fallback', async () => {
+      const inputGuardrail = defineToolInputGuardrail({
+        name: 'block_plain_structured_tool',
+        run: async () =>
+          ToolGuardrailFunctionOutputFactory.rejectContent('blocked'),
+      });
+      const execute = vi.fn(async () => ({ value: 'should-not-run' }));
+      const t = tool({
+        name: 'plain_structured_input_guardrail_tool',
+        description: 'tool with a plain JSON output schema',
+        parameters: z.object({}),
+        outputSchema: {
+          type: 'object',
+          properties: { value: { type: 'string' } },
+          required: ['value'],
+          additionalProperties: false,
+        },
+        execute,
+        inputGuardrails: [inputGuardrail],
+      }) as unknown as FunctionTool;
+
+      const error = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall, tool: t }],
+          runner,
+          state,
+        ).catch((caught) => caught),
       );
+
+      expect(error).toBeInstanceOf(ToolCallError);
+      expect((error as ToolCallError).error).toMatchObject({
+        message: 'blocked',
+      });
+      expect(execute).not.toHaveBeenCalled();
     });
 
     it('maps input guardrail rejection through a structured error fallback', async () => {

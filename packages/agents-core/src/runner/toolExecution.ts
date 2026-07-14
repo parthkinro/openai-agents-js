@@ -608,17 +608,12 @@ async function runApprovedFunctionTool<TContext>(
       let toolDetails: ToolCallDetails = { toolCall: toolRun.toolCall };
       let shouldValidateToolOutput = false;
       if (inputGuardrailResult.type === 'reject') {
-        if (toolRun.tool.outputSchema && toolRun.tool.errorFunction) {
-          toolOutput = await resolveFunctionFailureOutput(
-            deps,
-            toolRun,
-            new Error(inputGuardrailResult.message),
-            inputGuardrailResult.message,
-          );
-        } else {
-          toolOutput = inputGuardrailResult.message;
-          shouldValidateToolOutput = true;
-        }
+        toolOutput = await resolveFunctionFailureOutput(
+          deps,
+          toolRun,
+          new Error(inputGuardrailResult.message),
+          inputGuardrailResult.message,
+        );
       } else {
         const resumeState = state.getPendingAgentToolRun(
           toolName,
