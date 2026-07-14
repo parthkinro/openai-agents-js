@@ -109,6 +109,52 @@ class AbortAfterStreamedFunctionCallModel implements Model {
   }
 }
 
+class AbortAfterStreamedProgramModel implements Model {
+  public requests: ModelRequest[] = [];
+
+  constructor(private readonly responseId: string) {}
+
+  async getResponse(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request);
+    return {
+      output: [fakeModelMessage('reconciled')],
+      usage: new Usage(),
+      responseId: 'resp-reconciled',
+    };
+  }
+
+  async *getStreamedResponse(
+    request: ModelRequest,
+  ): AsyncIterable<StreamEvent> {
+    this.requests.push(request);
+    yield {
+      type: 'model',
+      event: {
+        type: 'response.created',
+        response: {
+          id: this.responseId,
+        },
+      },
+    };
+    yield {
+      type: 'model',
+      event: {
+        type: 'response.output_item.done',
+        item: {
+          type: 'program',
+          id: 'prog_abort',
+          call_id: 'call_prog_abort',
+          code: 'text("done");',
+          fingerprint: 'fingerprint:abort',
+        },
+      },
+    };
+    const error = new Error('aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+}
+
 // Test for unhandled rejection when stream loop throws
 
 describe('Runner.run (streaming)', () => {
@@ -386,6 +432,29 @@ describe('Runner.run (streaming)', () => {
       callId: 'call_abort',
       status: 'incomplete',
     });
+  });
+
+  it('reconciles streamed programs without outputs on abort', async () => {
+    const model = new AbortAfterStreamedProgramModel('resp-aborted');
+    const agent = new Agent({ name: 'AbortProgram', model });
+
+    const result = await run(agent, 'hi', {
+      stream: true,
+      conversationId: 'conv-program-abort',
+    });
+
+    await result.completed;
+
+    expect(model.requests).toHaveLength(2);
+    expect(model.requests[1].conversationId).toBe('conv-program-abort');
+    expect(getRequestInputItems(model.requests[1])).toEqual([
+      {
+        type: 'program_output',
+        callId: 'call_prog_abort',
+        status: 'incomplete',
+        output: 'aborted',
+      },
+    ]);
   });
 
   it('emits agent_updated_stream_event with new agent on handoff', async () => {
@@ -3047,8 +3116,7 @@ describe('Runner.run (streaming)', () => {
       .mockResolvedValue();
 
     let resolveGuardrail:
-      | ((value: GuardrailFunctionOutput) => void)
-      | undefined;
+      ((value: GuardrailFunctionOutput) => void) | undefined;
     const guardrail = {
       name: 'parallel-allow',
       execute: vi.fn(

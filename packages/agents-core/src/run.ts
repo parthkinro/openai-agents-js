@@ -395,8 +395,7 @@ export async function run<TAgent extends Agent<any, any>, TContext = undefined>(
   agent: TAgent,
   input: string | AgentInputItem[] | RunState<TContext, TAgent>,
   options?:
-    | StreamRunOptions<TContext, TAgent>
-    | NonStreamRunOptions<TContext, TAgent>,
+    StreamRunOptions<TContext, TAgent> | NonStreamRunOptions<TContext, TAgent>,
 ): Promise<RunResult<TContext, TAgent> | StreamedRunResult<TContext, TAgent>> {
   const runner = getDefaultRunner();
   if (options?.stream) {
@@ -1416,7 +1415,7 @@ export class Runner extends RunHooks<any, AgentOutputType<unknown>> {
               );
             } catch (error) {
               logger.debug(
-                'Failed to reconcile streamed function calls after abort.',
+                'Failed to reconcile streamed tool calls after abort.',
                 error,
               );
             }
