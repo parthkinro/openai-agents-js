@@ -243,8 +243,7 @@ describe('createAiSdkUiMessageStreamResponse', () => {
     ]);
 
     const textStart = chunks.find((chunk) => chunk.type === 'text-start') as
-      | { id: string }
-      | undefined;
+      { id: string } | undefined;
     const textEnd = chunks.find((chunk) => chunk.type === 'text-end');
     const textDelta = chunks.find((chunk) => chunk.type === 'text-delta');
     const textStartId = textStart?.id;
@@ -278,6 +277,57 @@ describe('createAiSdkUiMessageStreamResponse', () => {
       (chunk) => chunk.type === 'reasoning-delta',
     );
     expect(reasoningDelta).toMatchObject({ delta: 'Reasoning summary' });
+  });
+
+  test('maps Programmatic Tool Calling to one tool lifecycle', async () => {
+    const agent = new Agent({ name: 'Test Agent' });
+    const programCall = new RunToolCallItem(
+      {
+        type: 'program',
+        callId: 'call-program-1',
+        code: 'text("done")',
+        fingerprint: 'program-fingerprint',
+      },
+      agent,
+    );
+    const programOutput = new RunToolCallOutputItem(
+      {
+        type: 'program_output',
+        callId: 'call-program-1',
+        output: 'done',
+        status: 'completed',
+      },
+      agent,
+      'done',
+    );
+    const events = (async function* () {
+      yield new RunItemStreamEvent('tool_called', programCall);
+      yield new RunItemStreamEvent('tool_output', programOutput);
+    })();
+
+    const chunks = await readUiMessageChunks(
+      createAiSdkUiMessageStreamResponse(events),
+    );
+    const programInputIndex = chunks.findIndex(
+      (chunk) => chunk.type === 'tool-input-available',
+    );
+    const programOutputIndex = chunks.findIndex(
+      (chunk) => chunk.type === 'tool-output-available',
+    );
+
+    expect(programInputIndex).toBeGreaterThan(-1);
+    expect(programOutputIndex).toBeGreaterThan(programInputIndex);
+    expect(chunks[programInputIndex]).toMatchObject({
+      toolCallId: 'call-program-1',
+      toolName: 'programmatic_tool_calling',
+      input: { code: 'text("done")' },
+      dynamic: true,
+    });
+    expect(chunks[programOutputIndex]).toMatchObject({
+      toolCallId: 'call-program-1',
+      output: 'done',
+      dynamic: true,
+    });
   });
 
   test('emits finish after run-item events when response_done arrives early', async () => {

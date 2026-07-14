@@ -27,9 +27,7 @@ export type AiSdkUiMessageStreamSource =
   | { toStream: () => ReadableStream<RunStreamEvent> };
 
 export type AiSdkUiMessageStreamHeaders =
-  | Headers
-  | Record<string, string>
-  | Array<[string, string]>;
+  Headers | Record<string, string> | Array<[string, string]>;
 
 export type AiSdkUiMessageStreamResponseOptions = {
   headers?: AiSdkUiMessageStreamHeaders;
@@ -98,6 +96,14 @@ function extractToolInput(item: RunToolCallItem): ToolInputPayload | null {
       toolCallId,
       toolName,
       input: parseJsonArgs(raw.arguments),
+    };
+  }
+
+  if (raw.type === 'program' && typeof raw.code === 'string') {
+    return {
+      toolCallId,
+      toolName: 'programmatic_tool_calling',
+      input: { code: raw.code },
     };
   }
 
