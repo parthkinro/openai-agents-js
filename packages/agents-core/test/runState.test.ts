@@ -1035,6 +1035,140 @@ describe('RunState', () => {
     ).rejects.toThrow('does not support Programmatic Tool Calling items');
   });
 
+  it('rechecks allowed callers against rebound tools during resume', async () => {
+    const caller = {
+      type: 'program' as const,
+      callerId: 'call_program',
+    };
+    const createProcessedResponse = (
+      overrides: Record<string, unknown>,
+    ): NonNullable<RunState<any, any>['_lastProcessedResponse']> =>
+      ({
+        newItems: [],
+        toolsUsed: [],
+        handoffs: [],
+        functions: [],
+        computerActions: [],
+        shellActions: [],
+        applyPatchActions: [],
+        mcpApprovalRequests: [],
+        hasToolsOrApprovalsToRun: () => true,
+        ...overrides,
+      }) as NonNullable<RunState<any, any>['_lastProcessedResponse']>;
+
+    const savedFunction = tool({
+      name: 'lookup',
+      description: 'Look up a value.',
+      parameters: z.object({}),
+      allowedCallers: ['programmatic'],
+      execute: async () => 'saved',
+    });
+    const functionCall: protocol.FunctionCallItem = {
+      type: 'function_call',
+      name: 'lookup',
+      callId: 'call_function',
+      arguments: '{}',
+      caller,
+    };
+    const savedFunctionAgent = new Agent({
+      name: 'FunctionResumeAgent',
+      tools: [savedFunction],
+    });
+    const functionState = new RunState(
+      new RunContext(),
+      'input',
+      savedFunctionAgent,
+      1,
+    );
+    functionState._lastProcessedResponse = createProcessedResponse({
+      functions: [{ toolCall: functionCall, tool: savedFunction }],
+    });
+
+    await expect(
+      RunState.fromString(savedFunctionAgent, functionState.toString()),
+    ).resolves.toBeInstanceOf(RunState);
+
+    const reboundFunctionAgent = new Agent({
+      name: 'FunctionResumeAgent',
+      tools: [
+        tool({
+          name: 'lookup',
+          description: 'Look up a value.',
+          parameters: z.object({}),
+          execute: async () => 'rebound',
+        }),
+      ],
+    });
+    await expect(
+      RunState.fromString(reboundFunctionAgent, functionState.toString()),
+    ).rejects.toThrow(/caller programmatic/);
+
+    const savedShell = shellTool({
+      shell: new FakeShell(),
+      allowedCallers: ['programmatic'],
+    });
+    const shellCall: protocol.ShellCallItem = {
+      type: 'shell_call',
+      callId: 'call_shell',
+      action: { commands: ['echo hi'] },
+      caller,
+    };
+    const savedShellAgent = new Agent({
+      name: 'ShellResumeAgent',
+      tools: [savedShell],
+    });
+    const shellState = new RunState(
+      new RunContext(),
+      'input',
+      savedShellAgent,
+      1,
+    );
+    shellState._lastProcessedResponse = createProcessedResponse({
+      shellActions: [{ toolCall: shellCall, shell: savedShell }],
+    });
+    const reboundShellAgent = new Agent({
+      name: 'ShellResumeAgent',
+      tools: [shellTool({ shell: new FakeShell() })],
+    });
+    await expect(
+      RunState.fromString(reboundShellAgent, shellState.toString()),
+    ).rejects.toThrow(/caller programmatic/);
+
+    const savedApplyPatch = applyPatchTool({
+      editor: new FakeEditor(),
+      allowedCallers: ['programmatic'],
+    });
+    const applyPatchCall: protocol.ApplyPatchCallItem = {
+      type: 'apply_patch_call',
+      callId: 'call_apply_patch',
+      status: 'completed',
+      operation: { type: 'delete_file', path: 'temp.txt' },
+      caller,
+    };
+    const savedApplyPatchAgent = new Agent({
+      name: 'ApplyPatchResumeAgent',
+      tools: [savedApplyPatch],
+    });
+    const applyPatchState = new RunState(
+      new RunContext(),
+      'input',
+      savedApplyPatchAgent,
+      1,
+    );
+    applyPatchState._lastProcessedResponse = createProcessedResponse({
+      applyPatchActions: [
+        { toolCall: applyPatchCall, applyPatch: savedApplyPatch },
+      ],
+    });
+    const reboundApplyPatchAgent = new Agent({
+      name: 'ApplyPatchResumeAgent',
+      tools: [applyPatchTool({ editor: new FakeEditor() })],
+    });
+    await expect(
+      RunState.fromString(reboundApplyPatchAgent, applyPatchState.toString()),
+    ).rejects.toThrow(/caller programmatic/);
+  });
+
   it('accepts schema 1.13 application data that resembles PTC items', async () => {
     const context = new RunContext({
       nested: { type: 'program_output' },

@@ -61,6 +61,7 @@ import {
   executeCustomClientToolSearch,
   getClientToolSearchHelper,
 } from './runner/toolSearch';
+import { ensureToolCallerAllowed } from './runner/toolCaller';
 import {
   getSerializedApplyPatchToolPlaceholder,
   getSerializedComputerToolPlaceholder,
@@ -2246,9 +2247,17 @@ async function deserializeProcessedResponse<TContext = UnknownContext>(
         throw new UserError(`Handoff ${handoff.handoff.toolName} not found`);
       }
 
+      const resolvedHandoff = handoffs.get(handoff.handoff.toolName)!;
+      ensureToolCallerAllowed(
+        handoff.toolCall as protocol.FunctionCallItem,
+        undefined,
+        resolvedHandoff.toolName,
+        currentAgent,
+      );
+
       return {
         toolCall: handoff.toolCall,
-        handoff: handoffs.get(handoff.handoff.toolName)!,
+        handoff: resolvedHandoff,
       };
     }),
     functions: await Promise.all(
@@ -2269,6 +2278,13 @@ async function deserializeProcessedResponse<TContext = UnknownContext>(
         if (!resolvedTool) {
           throw new UserError(`Tool ${toolIdentity} not found`);
         }
+
+        ensureToolCallerAllowed(
+          functionCall.toolCall as protocol.FunctionCallItem,
+          resolvedTool.allowedCallers,
+          getFunctionToolQualifiedName(resolvedTool) ?? resolvedTool.name,
+          currentAgent,
+        );
 
         return {
           toolCall: functionCall.toolCall,
@@ -2316,6 +2332,13 @@ async function deserializeProcessedResponse<TContext = UnknownContext>(
           throw new UserError(`Shell tool ${toolName} not found`);
         }
 
+        ensureToolCallerAllowed(
+          shellAction.toolCall as protocol.ShellCallItem,
+          shellTool.allowedCallers,
+          shellTool.name,
+          currentAgent,
+        );
+
         return {
           toolCall: shellAction.toolCall,
           shell: shellTool,
@@ -2338,6 +2361,13 @@ async function deserializeProcessedResponse<TContext = UnknownContext>(
       if (!applyPatchTool) {
         throw new UserError(`Apply patch tool ${toolName} not found`);
       }
+
+      ensureToolCallerAllowed(
+        applyPatchAction.toolCall as protocol.ApplyPatchCallItem,
+        applyPatchTool.allowedCallers,
+        applyPatchTool.name,
+        currentAgent,
+      );
 
       return {
         toolCall: applyPatchAction.toolCall,

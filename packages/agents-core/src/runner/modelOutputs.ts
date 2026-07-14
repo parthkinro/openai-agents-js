@@ -59,6 +59,7 @@ import {
   executeCustomClientToolSearch,
   getClientToolSearchHelper,
 } from './toolSearch';
+import { ensureToolCallerAllowed } from './toolCaller';
 
 function ensureToolAvailable<T>(
   tool: T | undefined,
@@ -73,34 +74,6 @@ function ensureToolAvailable<T>(
     throw new ModelBehaviorError(message);
   }
   return tool;
-}
-
-function ensureToolCallerAllowed(
-  toolCall: protocol.ToolCallItem,
-  allowedCallers: readonly ToolAllowedCaller[] | undefined,
-  toolName: string,
-  agent: Agent<any, any>,
-): void {
-  const caller: ToolAllowedCaller =
-    'caller' in toolCall && toolCall.caller?.type === 'program'
-      ? 'programmatic'
-      : 'direct';
-  const effectiveAllowedCallers = allowedCallers ?? ['direct'];
-  if (effectiveAllowedCallers.includes(caller)) {
-    return;
-  }
-
-  const message = `Model invoked tool ${toolName} with caller ${caller}, but the tool allows only ${JSON.stringify(effectiveAllowedCallers)}.`;
-  addErrorToCurrentSpan({
-    message,
-    data: {
-      agent_name: agent.name,
-      tool_name: toolName,
-      tool_call_id: 'callId' in toolCall ? toolCall.callId : undefined,
-      tool_caller: caller,
-    },
-  });
-  throw new ModelBehaviorError(message);
 }
 
 function handleToolCallAction<
