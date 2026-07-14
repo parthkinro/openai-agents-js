@@ -1376,6 +1376,19 @@ export type ToolInputParametersNonStrict =
   undefined | JsonObjectSchemaNonStrict<any>;
 
 /**
+ * A schema describing the JSON object encoded in a function tool output.
+ *
+ * Zod schemas are converted to JSON Schema when the tool is created. Plain
+ * JSON Schema objects are passed through unchanged.
+ */
+export type ToolOutputSchema = ZodObjectLike | JsonObjectSchema<any>;
+
+type ToolExecuteResult<
+  TOutputSchema extends ToolOutputSchema | undefined,
+  Result,
+> = TOutputSchema extends ZodObjectLike ? ZodInfer<TOutputSchema> : Result;
+
+/**
  * The arguments to a tool.
  *
  * The type of the arguments are derived from the parameters passed to the tool definition.
@@ -1399,11 +1412,12 @@ export type ToolExecuteArgument<TParameters extends ToolInputParameters> =
 type ToolExecuteFunction<
   TParameters extends ToolInputParameters,
   Context = UnknownContext,
+  Result = unknown,
 > = (
   input: ToolExecuteArgument<TParameters>,
   context?: RunContext<Context>,
   details?: ToolCallDetails,
-) => Promise<unknown> | unknown;
+) => Promise<Result> | Result;
 
 /**
  * The function to invoke when an error occurs while running the tool. This can be used to define
@@ -1478,6 +1492,7 @@ const MAX_FUNCTION_TOOL_TIMEOUT_MS = 2_147_483_647;
 type StrictToolOptions<
   TParameters extends ToolInputParametersStrict,
   Context = UnknownContext,
+  TOutputSchema extends ToolOutputSchema | undefined = undefined,
 > = ToolGuardrailOptions<Context> & {
   /**
    * The name of the tool. Must be unique within the agent.
@@ -1512,14 +1527,20 @@ type StrictToolOptions<
   allowedCallers?: ToolAllowedCaller[];
 
   /**
-   * Responses API only. Describes the JSON value encoded in string outputs.
+   * Responses API only. Describes the JSON object encoded in string outputs.
+   * Zod object schemas are converted to JSON Schema and constrain the return
+   * type of `execute` to the inferred Zod output type.
    */
-  outputSchema?: JsonObjectSchema<any>;
+  outputSchema?: TOutputSchema;
 
   /**
    * The function to invoke when the tool is called.
    */
-  execute: ToolExecuteFunction<TParameters, Context>;
+  execute: ToolExecuteFunction<
+    TParameters,
+    Context,
+    ToolExecuteResult<TOutputSchema, unknown>
+  >;
 
   /**
    * The function to invoke when an error occurs while running the tool.
@@ -1568,6 +1589,7 @@ type StrictToolOptions<
 type NonStrictToolOptions<
   TParameters extends ToolInputParametersNonStrict,
   Context = UnknownContext,
+  TOutputSchema extends ToolOutputSchema | undefined = undefined,
 > = ToolGuardrailOptions<Context> & {
   /**
    * The name of the tool. Must be unique within the agent.
@@ -1600,14 +1622,20 @@ type NonStrictToolOptions<
   allowedCallers?: ToolAllowedCaller[];
 
   /**
-   * Responses API only. Describes the JSON value encoded in string outputs.
+   * Responses API only. Describes the JSON object encoded in string outputs.
+   * Zod object schemas are converted to JSON Schema and constrain the return
+   * type of `execute` to the inferred Zod output type.
    */
-  outputSchema?: JsonObjectSchema<any>;
+  outputSchema?: TOutputSchema;
 
   /**
    * The function to invoke when the tool is called.
    */
-  execute: ToolExecuteFunction<TParameters, Context>;
+  execute: ToolExecuteFunction<
+    TParameters,
+    Context,
+    ToolExecuteResult<TOutputSchema, unknown>
+  >;
 
   /**
    * The function to invoke when an error occurs while running the tool.
@@ -1656,17 +1684,24 @@ type NonStrictToolOptions<
 export type ToolOptions<
   TParameters extends ToolInputParameters,
   Context = UnknownContext,
+  TOutputSchema extends ToolOutputSchema | undefined = undefined,
 > =
-  | StrictToolOptions<Extract<TParameters, ToolInputParametersStrict>, Context>
+  | StrictToolOptions<
+      Extract<TParameters, ToolInputParametersStrict>,
+      Context,
+      TOutputSchema
+    >
   | NonStrictToolOptions<
       Extract<TParameters, ToolInputParametersNonStrict>,
-      Context
+      Context,
+      TOutputSchema
     >;
 
 export type ToolOptionsWithGuardrails<
   TParameters extends ToolInputParameters,
   Context = UnknownContext,
-> = ToolOptions<TParameters, Context>;
+  TOutputSchema extends ToolOutputSchema | undefined = undefined,
+> = ToolOptions<TParameters, Context, TOutputSchema>;
 
 type NamespacedFunctionTool<
   Context = UnknownContext,
@@ -1914,9 +1949,14 @@ export function tool<
   TParameters extends ToolInputParameters = undefined,
   Context = UnknownContext,
   Result = string,
+  TOutputSchema extends ToolOutputSchema | undefined = undefined,
 >(
-  options: ToolOptions<TParameters, Context>,
-): FunctionTool<Context, TParameters, Result> {
+  options: ToolOptions<TParameters, Context, TOutputSchema>,
+): FunctionTool<
+  Context,
+  TParameters,
+  ToolExecuteResult<TOutputSchema, Result>
+> {
   const name = options.name
     ? toFunctionToolName(options.name)
     : toFunctionToolName(options.execute.name);
@@ -1947,12 +1987,19 @@ export function tool<
     name,
     { strict: strictMode },
   );
+  const outputSchema: JsonObjectSchema<any> | undefined = isZodObject(
+    options.outputSchema,
+  )
+    ? getSchemaAndParserFromInputType(options.outputSchema, `${name}_output`, {
+        strict: true,
+      }).schema
+    : (options.outputSchema as JsonObjectSchema<any> | undefined);
 
   async function _invoke(
     runContext: RunContext<Context>,
     input: string,
     details?: ToolCallDetails,
-  ): Promise<Result> {
+  ): Promise<ToolExecuteResult<TOutputSchema, Result>> {
     const [error, parsed] = await safeExecute(() => parser(input));
     if (error !== null) {
       if (logger.dontLogToolData) {
@@ -1987,14 +2034,14 @@ export function tool<
       logger.debug(`Tool ${name} returned: ${stringResult}`);
     }
 
-    return result as Result;
+    return result as ToolExecuteResult<TOutputSchema, Result>;
   }
 
   async function invokeWithoutTimeout(
     runContext: RunContext<Context>,
     input: string,
     details?: ToolCallDetails,
-  ): Promise<string | Result> {
+  ): Promise<string | ToolExecuteResult<TOutputSchema, Result>> {
     return _invoke(runContext, input, details).catch<string>((error) => {
       if (
         details?.signal?.aborted &&
@@ -2023,14 +2070,17 @@ export function tool<
     runContext: RunContext<Context>,
     input: string,
     details?: ToolCallDetails,
-  ): Promise<string | Result> {
+  ): Promise<string | ToolExecuteResult<TOutputSchema, Result>> {
     const detailsWithFlag = details as
       ToolCallDetailsWithTimeoutFlag | undefined;
     if (detailsWithFlag?.[FUNCTION_TOOL_TIMEOUT_ALREADY_ENFORCED]) {
       return invokeWithoutTimeout(runContext, input, details);
     }
 
-    return invokeFunctionToolWithTimeout<Context, Result>({
+    return invokeFunctionToolWithTimeout<
+      Context,
+      ToolExecuteResult<TOutputSchema, Result>
+    >({
       toolName: name,
       invoke: invokeWithoutTimeout,
       runContext,
@@ -2070,7 +2120,7 @@ export function tool<
     ...(options.allowedCallers
       ? { allowedCallers: options.allowedCallers }
       : {}),
-    ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}),
+    ...(outputSchema ? { outputSchema } : {}),
     invoke,
     needsApproval,
     timeoutMs,

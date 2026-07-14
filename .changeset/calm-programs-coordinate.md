@@ -5,4 +5,4 @@
 '@openai/agents-extensions': patch
 ---
 
-feat: add Programmatic Tool Calling support across Responses conversion, caller-linked runtime history, stateless replay, streaming reconciliation, and RunState persistence, with explicit errors for unsupported Chat Completions and AI SDK adapter paths
+feat: add Programmatic Tool Calling with caller-aware runtime and replay support, Zod-derived function output schemas, examples, and explicit unsupported-adapter errors

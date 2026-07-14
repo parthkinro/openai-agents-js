@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi } from 'vitest';
 import {
   applyPatchTool,
   computerTool,
@@ -75,6 +75,44 @@ describe('Tool', () => {
     expect(serializeTool(t)).toMatchObject({
       allowedCallers: ['programmatic'],
       outputSchema,
+    });
+  });
+
+  it('converts a Zod output schema and infers the execute result', () => {
+    const outputSchema = z.object({
+      value: z.string(),
+      count: z.number(),
+    });
+    const t = tool({
+      name: 'structured_zod_lookup',
+      description: 'Return structured data.',
+      parameters: z.object({ query: z.string() }),
+      allowedCallers: ['programmatic'],
+      outputSchema,
+      execute: async ({ query }) => ({ value: query, count: 1 }),
+    });
+
+    expect(t.outputSchema).toEqual({
+      $schema: 'http://json-schema.org/draft-07/schema#',
+      type: 'object',
+      properties: {
+        value: { type: 'string' },
+        count: { type: 'number' },
+      },
+      required: ['value', 'count'],
+      additionalProperties: false,
+    });
+    expectTypeOf(t.invoke(new RunContext(), '{"query":"test"}')).toEqualTypeOf<
+      Promise<string | { value: string; count: number }>
+    >();
+
+    tool({
+      name: 'invalid_structured_zod_lookup',
+      description: 'Type-check an invalid structured result.',
+      parameters: z.object({ query: z.string() }),
+      outputSchema,
+      // @ts-expect-error The execute result must match the Zod output schema.
+      execute: async ({ query }) => ({ value: query, count: 'one' }),
     });
   });
 

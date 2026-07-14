@@ -249,6 +249,7 @@ export type {
   ShellToolContainerNetworkPolicyDisabled,
   ShellToolContainerNetworkPolicyDomainSecret,
   ToolInputParameters,
+  ToolOutputSchema,
   ToolOptions,
   ToolNamespaceOptions,
   ToolOutputCustomData,

@@ -1117,6 +1117,7 @@ describe('Runner.run', () => {
         name: 'ProgramAgent',
         model,
         tools: [lookup],
+        toolUseBehavior: 'stop_on_first_tool',
         modelSettings: { toolChoice: 'programmatic_tool_calling' },
       });
 

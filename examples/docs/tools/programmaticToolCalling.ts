@@ -6,15 +6,10 @@ const getInventory = tool({
   description: 'Return inventory for a SKU.',
   parameters: z.object({ sku: z.string() }),
   allowedCallers: ['programmatic'],
-  outputSchema: {
-    type: 'object',
-    properties: {
-      sku: { type: 'string' },
-      availableUnits: { type: 'number' },
-    },
-    required: ['sku', 'availableUnits'],
-    additionalProperties: false,
-  },
+  outputSchema: z.object({
+    sku: z.string(),
+    availableUnits: z.number(),
+  }),
   async execute({ sku }) {
     return { sku, availableUnits: 42 };
   },
@@ -25,15 +20,10 @@ const getDemand = tool({
   description: 'Return requested units for a SKU.',
   parameters: z.object({ sku: z.string() }),
   allowedCallers: ['programmatic'],
-  outputSchema: {
-    type: 'object',
-    properties: {
-      sku: { type: 'string' },
-      requestedUnits: { type: 'number' },
-    },
-    required: ['sku', 'requestedUnits'],
-    additionalProperties: false,
-  },
+  outputSchema: z.object({
+    sku: z.string(),
+    requestedUnits: z.number(),
+  }),
   async execute({ sku }) {
     return { sku, requestedUnits: 31 };
   },

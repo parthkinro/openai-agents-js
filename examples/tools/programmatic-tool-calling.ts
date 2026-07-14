@@ -26,20 +26,27 @@ const skuParameters = z.object({
   sku: sku.describe('The SKU to look up.'),
 });
 
+const inventoryOutput = z.object({
+  sku,
+  availableUnits: z.number(),
+});
+
+const weeklyDemandOutput = z.object({
+  sku,
+  forecastUnits: z.number(),
+});
+
+const inboundUnitsOutput = z.object({
+  sku,
+  inboundUnits: z.number(),
+});
+
 const getInventory = tool({
   name: 'get_inventory',
   description: 'Return the currently available units for one SKU.',
   parameters: skuParameters,
   allowedCallers: ['programmatic'],
-  outputSchema: {
-    type: 'object',
-    properties: {
-      sku: { type: 'string' },
-      availableUnits: { type: 'number' },
-    },
-    required: ['sku', 'availableUnits'],
-    additionalProperties: false,
-  },
+  outputSchema: inventoryOutput,
   execute: async ({ sku }) => {
     console.log(`[tool] get_inventory(${sku})`);
     return { sku, availableUnits: inventory[sku] };
@@ -51,15 +58,7 @@ const getWeeklyDemand = tool({
   description: 'Return forecast demand for one SKU for the next seven days.',
   parameters: skuParameters,
   allowedCallers: ['programmatic'],
-  outputSchema: {
-    type: 'object',
-    properties: {
-      sku: { type: 'string' },
-      forecastUnits: { type: 'number' },
-    },
-    required: ['sku', 'forecastUnits'],
-    additionalProperties: false,
-  },
+  outputSchema: weeklyDemandOutput,
   execute: async ({ sku }) => {
     console.log(`[tool] get_weekly_demand(${sku})`);
     return { sku, forecastUnits: weeklyDemand[sku] };
@@ -71,15 +70,7 @@ const getInboundUnits = tool({
   description: 'Return units already scheduled to arrive for one SKU.',
   parameters: skuParameters,
   allowedCallers: ['programmatic'],
-  outputSchema: {
-    type: 'object',
-    properties: {
-      sku: { type: 'string' },
-      inboundUnits: { type: 'number' },
-    },
-    required: ['sku', 'inboundUnits'],
-    additionalProperties: false,
-  },
+  outputSchema: inboundUnitsOutput,
   execute: async ({ sku }) => {
     console.log(`[tool] get_inbound_units(${sku})`);
     return { sku, inboundUnits: inboundUnits[sku] };

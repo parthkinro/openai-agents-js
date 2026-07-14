@@ -395,6 +395,79 @@ describe('checkForFinalOutputFromTools', () => {
     expect(res).toEqual({ isFinalOutput: true, finalOutput: 'sunny' });
   });
 
+  it.each(['stop_on_first_tool' as const, { stopAtToolNames: ['weather'] }])(
+    'does not finalize program-owned tool results with %j',
+    async (behavior) => {
+      const agent = new Agent({
+        name: 'ProgramOwnedResult',
+        toolUseBehavior: behavior,
+      });
+      const programOwnedResult: FunctionToolResult = {
+        type: 'function_output',
+        tool: weatherTool,
+        output: 'sunny',
+        runItem: new ToolCallOutputItem(
+          {
+            type: 'function_call_result',
+            name: 'weather',
+            callId: 'call_weather',
+            status: 'completed',
+            output: { type: 'text', text: 'sunny' },
+            caller: { type: 'program', callerId: 'call_program' },
+          },
+          agent,
+          'sunny',
+        ),
+      };
+
+      const res = await checkForFinalOutputFromTools(
+        agent,
+        [programOwnedResult],
+        state,
+      );
+
+      expect(res.isFinalOutput).toBe(false);
+    },
+  );
+
+  it('does not pass program-owned tool results to custom finalization', async () => {
+    const finalize = vi.fn(async () => ({
+      isFinalOutput: true as const,
+      finalOutput: 'sunny',
+      isInterrupted: undefined,
+    }));
+    const agent = new Agent({
+      name: 'CustomProgramOwnedResult',
+      toolUseBehavior: finalize,
+    });
+    const programOwnedResult: FunctionToolResult = {
+      type: 'function_output',
+      tool: weatherTool,
+      output: 'sunny',
+      runItem: new ToolCallOutputItem(
+        {
+          type: 'function_call_result',
+          name: 'weather',
+          callId: 'call_weather',
+          status: 'completed',
+          output: { type: 'text', text: 'sunny' },
+          caller: { type: 'program', callerId: 'call_program' },
+        },
+        agent,
+        'sunny',
+      ),
+    };
+
+    const res = await checkForFinalOutputFromTools(
+      agent,
+      [programOwnedResult],
+      state,
+    );
+
+    expect(res.isFinalOutput).toBe(false);
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
   it("stop_on_first_tool returns NOT_FINAL_OUTPUT when first isn't function output", async () => {
     const agent = new Agent({
       name: 'StopNoOut',

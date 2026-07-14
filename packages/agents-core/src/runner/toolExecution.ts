@@ -1603,11 +1603,24 @@ export async function checkForFinalOutputFromTools<
     };
   }
 
+  const finalizationResults = toolResults.filter((result) => {
+    const rawItem = result.runItem.rawItem;
+    return !(
+      rawItem &&
+      'caller' in rawItem &&
+      rawItem.caller?.type === 'program'
+    );
+  });
+
+  if (finalizationResults.length === 0) {
+    return NOT_FINAL_OUTPUT;
+  }
+
   if (agent.toolUseBehavior === 'run_llm_again') {
     return NOT_FINAL_OUTPUT;
   }
 
-  const firstToolResult = toolResults[0];
+  const firstToolResult = finalizationResults[0];
   if (agent.toolUseBehavior === 'stop_on_first_tool') {
     if (firstToolResult?.type === 'function_output') {
       const stringOutput = toSmartString(firstToolResult.output);
@@ -1622,7 +1635,7 @@ export async function checkForFinalOutputFromTools<
 
   const toolUseBehavior = agent.toolUseBehavior;
   if (typeof toolUseBehavior === 'object') {
-    const stoppingTool = toolResults.find((r) => {
+    const stoppingTool = finalizationResults.find((r) => {
       return toolUseBehavior.stopAtToolNames.some((toolName) =>
         matchesFunctionToolName(r.tool, toolName),
       );
@@ -1639,7 +1652,10 @@ export async function checkForFinalOutputFromTools<
   }
 
   if (typeof toolUseBehavior === 'function') {
-    return toolUseBehavior(state._context, toolResults as FunctionToolResult[]);
+    return toolUseBehavior(
+      state._context,
+      finalizationResults as FunctionToolResult[],
+    );
   }
 
   throw new UserError(`Invalid toolUseBehavior: ${toolUseBehavior}`, state);
