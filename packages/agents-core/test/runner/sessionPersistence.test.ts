@@ -1773,10 +1773,19 @@ describe('prepareInputItemsWithSession', () => {
       output: 'done',
       caller: { type: 'program', callerId: 'program_1' },
     };
+    const hostedCall: AgentInputItem = {
+      type: 'hosted_tool_call',
+      id: 'ci_1',
+      name: 'code_interpreter_call',
+      status: 'completed',
+      caller: { type: 'program', callerId: 'program_1' },
+      providerData: { type: 'code_interpreter_call' },
+    };
     const session = new StubSession([
       program,
       functionCall,
       functionOutput,
+      hostedCall,
       programOutput,
     ]);
 

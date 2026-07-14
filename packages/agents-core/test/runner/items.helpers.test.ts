@@ -394,6 +394,51 @@ describe('dropOrphanToolCalls', () => {
     expect(dropOrphanToolCalls([program, call])).toEqual([]);
   });
 
+  it('keeps active programs with program-owned hosted calls', () => {
+    const program: protocol.ProgramCallItem = {
+      type: 'program',
+      callId: 'program_pending',
+      code: 'return await tools.code_interpreter({});',
+      fingerprint: 'fingerprint:pending',
+    };
+    const hostedCall: protocol.HostedToolCallItem = {
+      type: 'hosted_tool_call',
+      id: 'ci_1',
+      name: 'code_interpreter_call',
+      status: 'completed',
+      caller: { type: 'program', callerId: 'program_pending' },
+      providerData: { type: 'code_interpreter_call' },
+    };
+
+    expect(dropOrphanToolCalls([program, hostedCall])).toEqual([
+      program,
+      hostedCall,
+    ]);
+  });
+
+  it('drops program-owned hosted calls with an explicitly pruned owner', () => {
+    const program: protocol.ProgramCallItem = {
+      type: 'program',
+      callId: 'program_orphan',
+      code: 'return await tools.code_interpreter({});',
+      fingerprint: 'fingerprint:orphan',
+    };
+    const hostedCall: protocol.HostedToolCallItem = {
+      type: 'hosted_tool_call',
+      id: 'ci_1',
+      name: 'code_interpreter_call',
+      status: 'completed',
+      caller: { type: 'program', callerId: 'program_orphan' },
+      providerData: { type: 'code_interpreter_call' },
+    };
+
+    expect(
+      dropOrphanToolCalls([program, hostedCall], {
+        pruningIndexes: new Set([0, 1]),
+      }),
+    ).toEqual([]);
+  });
+
   it('prunes only the indexes explicitly marked for pruning', () => {
     const historyShell: AgentInputItem = {
       type: 'shell_call',

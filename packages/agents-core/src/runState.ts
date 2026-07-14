@@ -1235,7 +1235,8 @@ function isProgrammaticToolCallingProtocolItem(value: unknown): boolean {
     item.type !== 'shell_call' &&
     item.type !== 'shell_call_output' &&
     item.type !== 'apply_patch_call' &&
-    item.type !== 'apply_patch_call_output'
+    item.type !== 'apply_patch_call_output' &&
+    item.type !== 'hosted_tool_call'
   ) {
     return false;
   }

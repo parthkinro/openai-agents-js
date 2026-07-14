@@ -1794,12 +1794,35 @@ describe('getInputItems', () => {
         type: 'hosted_tool_call',
         id: 'c',
         status: 'completed',
+        caller: { type: 'program', callerId: 'call_prog_1' },
         providerData: { type: 'code_interpreter', code: 'print()' },
       },
     ] as any);
     expect(ci[0]).toMatchObject({
       type: 'code_interpreter_call',
       code: 'print()',
+      caller: { type: 'program', caller_id: 'call_prog_1' },
+    });
+
+    const mcp = getInputItems([
+      {
+        type: 'hosted_tool_call',
+        id: 'mcp_1',
+        name: 'mcp_call',
+        status: 'completed',
+        caller: { type: 'program', callerId: 'call_prog_1' },
+        providerData: {
+          type: 'mcp_call',
+          id: 'mcp_1',
+          name: 'lookup',
+          arguments: '{}',
+          server_label: 'server',
+        },
+      },
+    ] as any);
+    expect(mcp[0]).toMatchObject({
+      type: 'mcp_call',
+      caller: { type: 'program', caller_id: 'call_prog_1' },
     });
 
     const img = getInputItems([
@@ -2245,6 +2268,61 @@ describe('getInputItems', () => {
 });
 
 describe('convertToOutputItem', () => {
+  it('lifts hosted Programmatic Tool Calling caller linkage', () => {
+    expect(
+      convertToOutputItem([
+        {
+          type: 'code_interpreter_call',
+          id: 'ci_1',
+          code: 'print("ok")',
+          container_id: 'container_1',
+          outputs: [{ type: 'logs', logs: 'ok' }],
+          status: 'completed',
+          caller: { type: 'program', caller_id: 'call_prog_1' },
+        },
+      ] as any),
+    ).toEqual([
+      {
+        type: 'hosted_tool_call',
+        id: 'ci_1',
+        name: 'code_interpreter_call',
+        status: 'completed',
+        output: undefined,
+        caller: { type: 'program', callerId: 'call_prog_1' },
+        providerData: {
+          type: 'code_interpreter_call',
+          id: 'ci_1',
+          code: 'print("ok")',
+          container_id: 'container_1',
+          outputs: [{ type: 'logs', logs: 'ok' }],
+        },
+      },
+    ]);
+  });
+
+  it('lifts hosted MCP caller linkage', () => {
+    const [output] = convertToOutputItem([
+      {
+        type: 'mcp_call',
+        id: 'mcp_1',
+        name: 'lookup',
+        arguments: '{}',
+        server_label: 'server',
+        status: 'completed',
+        output: 'ok',
+        caller: { type: 'program', caller_id: 'call_prog_1' },
+      },
+    ] as any);
+
+    expect(output).toMatchObject({
+      type: 'hosted_tool_call',
+      id: 'mcp_1',
+      name: 'mcp_call',
+      caller: { type: 'program', callerId: 'call_prog_1' },
+    });
+    expect(output.providerData).not.toHaveProperty('caller');
+  });
+
   it('converts Programmatic Tool Calling items and caller linkage', () => {
     const out = convertToOutputItem([
       {

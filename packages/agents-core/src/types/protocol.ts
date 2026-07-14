@@ -496,6 +496,11 @@ export const HostedToolCallItem = ItemBase.extend({
    * The primary output of the tool call. Additional output might be in the `providerData` field.
    */
   output: z.string().optional(),
+
+  /**
+   * The execution context that invoked the hosted tool.
+   */
+  caller: ToolCaller.optional(),
 });
 
 export type HostedToolCallItem = z.infer<typeof HostedToolCallItem>;

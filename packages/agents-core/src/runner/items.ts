@@ -206,11 +206,11 @@ function isRetainedProgramOwnedItem(
   if (isPendingHostedShellCall(item)) {
     return true;
   }
-  return (
-    item !== null &&
-    typeof item === 'object' &&
-    isSimpleToolResultType((item as { type?: unknown }).type)
-  );
+  if (item === null || typeof item !== 'object') {
+    return false;
+  }
+  const type = (item as { type?: unknown }).type;
+  return type === 'hosted_tool_call' || isSimpleToolResultType(type);
 }
 
 export function dropOrphanToolCalls(

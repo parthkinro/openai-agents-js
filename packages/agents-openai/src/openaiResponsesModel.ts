@@ -2348,6 +2348,11 @@ function getInputItems(
     }
 
     if (item.type === 'hosted_tool_call') {
+      const hostedCaller = (
+        item as protocol.HostedToolCallItem & {
+          caller?: protocol.ToolCaller;
+        }
+      ).caller;
       if (
         item.providerData?.type === 'web_search_call' ||
         item.providerData?.type === 'web_search' // for backward compatibility
@@ -2394,7 +2399,9 @@ function getInputItems(
         item.providerData?.type === 'code_interpreter_call' ||
         item.providerData?.type === 'code_interpreter' // for backward compatibility
       ) {
-        const entry: OpenAI.Responses.ResponseCodeInterpreterToolCall = {
+        const entry: OpenAI.Responses.ResponseCodeInterpreterToolCall & {
+          caller?: OpenAIToolCaller;
+        } = {
           ...camelOrSnakeToSnakeCase(item.providerData), // place here to prioritize the below fields
           type: 'code_interpreter_call',
           id: item.id!,
@@ -2405,6 +2412,7 @@ function getInputItems(
             item.providerData?.outputs ?? item.providerData?.results ?? [],
           status: CodeInterpreterStatus.parse(item.status ?? 'failed'),
           container_id: item.providerData?.container_id,
+          ...(hostedCaller ? { caller: toOpenAIToolCaller(hostedCaller) } : {}),
         };
 
         return entry;
@@ -2431,13 +2439,16 @@ function getInputItems(
       ) {
         const providerData =
           item.providerData as ProviderData.HostedMCPListTools;
-        const entry: OpenAI.Responses.ResponseInputItem.McpListTools = {
+        const entry: OpenAI.Responses.ResponseInputItem.McpListTools & {
+          caller?: OpenAIToolCaller;
+        } = {
           ...camelOrSnakeToSnakeCase(item.providerData),
           type: 'mcp_list_tools',
           id: item.id!,
           tools: camelOrSnakeToSnakeCase(providerData.tools) as any,
           server_label: providerData.server_label,
           error: providerData.error,
+          ...(hostedCaller ? { caller: toOpenAIToolCaller(hostedCaller) } : {}),
         };
         return entry;
       } else if (
@@ -2446,13 +2457,16 @@ function getInputItems(
       ) {
         const providerData =
           item.providerData as ProviderData.HostedMCPApprovalRequest;
-        const entry: OpenAI.Responses.ResponseInputItem.McpApprovalRequest = {
+        const entry: OpenAI.Responses.ResponseInputItem.McpApprovalRequest & {
+          caller?: OpenAIToolCaller;
+        } = {
           ...camelOrSnakeToSnakeCase(item.providerData), // place here to prioritize the below fields
           type: 'mcp_approval_request',
           id: providerData.id ?? item.id!,
           name: providerData.name,
           arguments: providerData.arguments,
           server_label: providerData.server_label,
+          ...(hostedCaller ? { caller: toOpenAIToolCaller(hostedCaller) } : {}),
         };
         return entry;
       } else if (
@@ -2475,7 +2489,9 @@ function getInputItems(
         item.name === 'mcp_call'
       ) {
         const providerData = item.providerData as ProviderData.HostedMCPCall;
-        const entry: OpenAI.Responses.ResponseInputItem.McpCall = {
+        const entry: OpenAI.Responses.ResponseInputItem.McpCall & {
+          caller?: OpenAIToolCaller;
+        } = {
           // output, which can be a large text string, is optional here, so we don't include it
           // output: item.output,
           ...camelOrSnakeToSnakeCase(providerData), // place here to prioritize the below fields
@@ -2485,6 +2501,7 @@ function getInputItems(
           arguments: providerData.arguments,
           server_label: providerData.server_label,
           error: providerData.error,
+          ...(hostedCaller ? { caller: toOpenAIToolCaller(hostedCaller) } : {}),
         };
         return entry;
       }
@@ -2649,6 +2666,12 @@ function convertToOutputItem(
       item.type === 'code_interpreter_call'
     ) {
       const { status, ...remainingItem } = item;
+      const caller = fromOpenAIToolCaller(
+        (remainingItem as { caller?: unknown }).caller,
+      );
+      if (caller) {
+        delete (remainingItem as { caller?: unknown }).caller;
+      }
       let outputData = undefined;
       if ('result' in remainingItem && remainingItem.result !== null) {
         // type: "image_generation_call"
@@ -2661,6 +2684,7 @@ function convertToOutputItem(
         name: item.type,
         status,
         output: outputData,
+        ...(caller ? { caller } : {}),
         providerData: remainingItem,
       };
       return output;
@@ -2855,35 +2879,56 @@ function convertToOutputItem(
       return output;
     } else if (item.type === 'mcp_list_tools') {
       const { ...providerData } = item;
+      const caller = fromOpenAIToolCaller(
+        (providerData as Record<string, unknown>).caller,
+      );
+      if (caller) {
+        delete (providerData as Record<string, unknown>).caller;
+      }
       const output: protocol.HostedToolCallItem = {
         type: 'hosted_tool_call',
         id: item.id!,
         name: item.type,
         status: 'completed',
         output: undefined,
+        ...(caller ? { caller } : {}),
         providerData,
       };
       return output;
     } else if (item.type === 'mcp_approval_request') {
       const { ...providerData } = item;
+      const caller = fromOpenAIToolCaller(
+        (providerData as Record<string, unknown>).caller,
+      );
+      if (caller) {
+        delete (providerData as Record<string, unknown>).caller;
+      }
       const output: protocol.HostedToolCallItem = {
         type: 'hosted_tool_call',
         id: item.id!,
         name: 'mcp_approval_request',
         status: 'completed',
         output: undefined,
+        ...(caller ? { caller } : {}),
         providerData,
       };
       return output;
     } else if (item.type === 'mcp_call') {
       // Avoiding to duplicate potentially large output data
       const { output: outputData, ...providerData } = item;
+      const caller = fromOpenAIToolCaller(
+        (providerData as Record<string, unknown>).caller,
+      );
+      if (caller) {
+        delete (providerData as Record<string, unknown>).caller;
+      }
       const output: protocol.HostedToolCallItem = {
         type: 'hosted_tool_call',
         id: item.id!,
         name: item.type,
         status: 'completed',
         output: outputData || undefined,
+        ...(caller ? { caller } : {}),
         providerData,
       };
       return output;

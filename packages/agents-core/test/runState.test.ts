@@ -1035,6 +1035,30 @@ describe('RunState', () => {
     ).rejects.toThrow('does not support Programmatic Tool Calling items');
   });
 
+  it('rejects pre-1.14 state with program-owned hosted calls', async () => {
+    const agent = new Agent({ name: 'HostedProgramAgent' });
+    const hostedCall: protocol.HostedToolCallItem = {
+      type: 'hosted_tool_call',
+      id: 'ci_1',
+      name: 'code_interpreter_call',
+      status: 'completed',
+      caller: { type: 'program', callerId: 'call_prog_1' },
+      providerData: { type: 'code_interpreter_call' },
+    };
+    const state = new RunState(new RunContext(), 'input', agent, 1);
+    state._generatedItems.push(new RunToolCallItem(hostedCall, agent));
+
+    const restored = await RunState.fromString(agent, state.toString());
+    expect(restored._generatedItems[0].rawItem).toEqual(hostedCall);
+
+    const serialized = state.toJSON();
+    serialized.$schemaVersion = '1.13';
+
+    await expect(
+      RunState.fromString(agent, JSON.stringify(serialized)),
+    ).rejects.toThrow('does not support Programmatic Tool Calling items');
+  });
+
   it('rechecks allowed callers against rebound tools during resume', async () => {
     const caller = {
       type: 'program' as const,
